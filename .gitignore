@@ -1,0 +1,6 @@
+node_modules/
+*.js
+!renderer.js
+*.js.map
+*.d.ts
+src/**/*.js

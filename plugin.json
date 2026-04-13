@@ -1,0 +1,80 @@
+{
+  "name": "bluebubbles",
+  "displayName": "BlueBubbles",
+  "version": "0.2.0",
+  "description": "iMessage & SMS integration via BlueBubbles server with AI-powered auto-reply",
+  "main": "main.js",
+  "renderer": "renderer.js",
+  "permissions": [
+    "config:read",
+    "config:write",
+    "state:publish",
+    "ui:panel",
+    "ui:navigation",
+    "ui:settings",
+    "network:fetch",
+    "http:listen",
+    "notifications:send",
+    "navigation:open",
+    "conversations:read",
+    "conversations:write",
+    "agent:backend"
+  ],
+  "priority": 50,
+  "required": false,
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "serverUrl": {
+        "type": "string",
+        "description": "BlueBubbles server URL (e.g. http://192.168.1.100:1234)"
+      },
+      "password": {
+        "type": "string",
+        "description": "BlueBubbles server password"
+      },
+      "webhookPort": {
+        "type": "number",
+        "default": 8742
+      },
+      "webhookHost": {
+        "type": "string",
+        "default": "0.0.0.0"
+      },
+      "webhookSecret": {
+        "type": "string",
+        "description": "Secret for webhook authentication"
+      },
+      "notifications": {
+        "type": "boolean",
+        "default": true
+      },
+      "aiReply": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean", "default": false },
+          "systemPrompt": { "type": "string" },
+          "dmBehavior": { "type": "string", "default": "smart" },
+          "groupBehavior": { "type": "string", "default": "smart" },
+          "maxHistoryPerChat": { "type": "number", "default": 50 },
+          "modelOverride": { "type": "string" }
+        }
+      },
+      "chunking": {
+        "type": "object",
+        "properties": {
+          "maxLength": { "type": "number", "default": 4000 },
+          "splitMode": { "type": "string", "default": "sentence" }
+        }
+      },
+      "contacts": {
+        "type": "object",
+        "description": "Address to name mapping"
+      },
+      "chatHistories": {
+        "type": "object",
+        "description": "Per-chat conversation history for AI context"
+      }
+    }
+  }
+}
