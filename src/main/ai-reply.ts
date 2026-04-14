@@ -13,7 +13,7 @@ import { DEFAULT_AI_SYSTEM_PROMPT, DEFAULT_MAX_CHUNK_LENGTH } from '../shared/co
 
 type AgentAPI = {
   generate: (options: {
-    messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
+    messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string | unknown[] }>;
     modelKey?: string;
     profileKey?: string;
     reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
@@ -90,17 +90,26 @@ export class AIReplyEngine {
 
     const senderName = this.contacts.resolve(senderAddress);
     const messageText = msg.text ?? '';
-    if (!messageText.trim()) return;
+
+    const imageAttachments = (msg.attachments ?? [])
+      .filter((a) => a.guid && a.mimeType?.startsWith('image/'));
+
+    if (!messageText.trim() && imageAttachments.length === 0) return;
 
     // Check behavior config
     const behavior = isGroup ? this.config.groupBehavior : this.config.dmBehavior;
     if (behavior === 'never') return;
 
     // Append incoming message to history regardless of debounce
+    const attachmentMeta = imageAttachments.map((a) => ({
+      url: this.client.getAttachmentUrl(a.guid!),
+      mimeType: a.mimeType!,
+    }));
     this.history.appendMessage(chatGuid, {
       role: 'user',
-      content: messageText,
+      content: messageText || (imageAttachments.length > 0 ? '[Image]' : ''),
       senderName,
+      ...(attachmentMeta.length > 0 ? { attachments: attachmentMeta } : {}),
     });
 
     // Debounce per chat — skip AI generation but message is still in history
@@ -137,7 +146,35 @@ export class AIReplyEngine {
 
       const threadSettings = this.getThreadSettings(chatGuid);
       const systemPrompt = threadSettings?.systemPrompt || this.buildSystemPrompt(isGroup, chat);
-      const messages = this.history.toAgentMessages(chatGuid);
+      const messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string | unknown[] }> =
+        this.history.toAgentMessages(chatGuid);
+
+      // For the current message, fetch image data and inject as multimodal content
+      if (imageAttachments.length > 0 && messages.length > 0) {
+        const lastMsg = messages[messages.length - 1];
+        const parts: unknown[] = [];
+        const textContent = typeof lastMsg.content === 'string' ? lastMsg.content : '';
+        if (textContent) {
+          parts.push({ type: 'text', text: textContent });
+        }
+        for (const att of imageAttachments) {
+          try {
+            const imageData = await this.client.fetchAttachmentAsBase64(att.guid!);
+            if (imageData) {
+              parts.push({
+                type: 'image',
+                image: Buffer.from(imageData.base64, 'base64'),
+                mimeType: imageData.mimeType,
+              });
+            }
+          } catch (err) {
+            this.log.warn(`Failed to fetch attachment ${att.guid}:`, err);
+          }
+        }
+        if (parts.length > 0) {
+          messages[messages.length - 1] = { ...lastMsg, content: parts };
+        }
+      }
 
       this.log.info(`AI generating reply for ${chatGuid} (${messages.length} messages in context)`);
 

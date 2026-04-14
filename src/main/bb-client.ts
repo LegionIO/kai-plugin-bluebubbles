@@ -221,4 +221,17 @@ export class BlueBubblesClient {
   getAttachmentUrl(guid: string): string {
     return this.url(BB_API_PATHS.attachment(guid));
   }
+
+  async fetchAttachmentAsBase64(guid: string): Promise<{ base64: string; mimeType: string } | null> {
+    try {
+      const url = this.getAttachmentUrl(guid);
+      const res = await this.fetchFn(url);
+      if (!res.ok) return null;
+      const contentType = res.headers.get('content-type') ?? 'application/octet-stream';
+      const buffer = Buffer.from(await res.arrayBuffer());
+      return { base64: buffer.toString('base64'), mimeType: contentType };
+    } catch {
+      return null;
+    }
+  }
 }

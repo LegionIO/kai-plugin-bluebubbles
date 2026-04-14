@@ -43,14 +43,20 @@ export class ChatHistoryManager {
     this.persist();
   }
 
-  toAgentMessages(chatGuid: string): Array<{ role: 'user' | 'assistant' | 'system'; content: string }> {
+  toAgentMessages(chatGuid: string): Array<{ role: 'user' | 'assistant' | 'system'; content: string | unknown[] }> {
     const history = this.getHistory(chatGuid);
-    return history.map((msg) => ({
-      role: msg.role,
-      content: msg.senderName && msg.role === 'user'
+    return history.map((msg) => {
+      let text = msg.senderName && msg.role === 'user'
         ? `[${msg.senderName}] ${msg.content}`
-        : msg.content,
-    }));
+        : msg.content;
+
+      const imageCount = (msg.attachments ?? []).filter((a) => a.mimeType.startsWith('image/')).length;
+      if (imageCount > 0 && !text.includes('[Image')) {
+        text += ` [${imageCount} image${imageCount > 1 ? 's' : ''} attached]`;
+      }
+
+      return { role: msg.role, content: text };
+    });
   }
 
   reload(): void {

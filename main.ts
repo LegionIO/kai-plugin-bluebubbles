@@ -5,6 +5,8 @@ import { ContactBook } from './src/main/contacts.js';
 import { ChatHistoryManager } from './src/main/chat-history.js';
 import { createWebhookHandler } from './src/main/webhook-handler.js';
 import { normalizeChat, normalizeMessage } from './src/main/message-normalizer.js';
+import { processMessagesWithReactions } from './src/main/reaction-utils.js';
+import { buildBlueBubblesTools } from './src/main/tools.js';
 import {
   PANEL_ID,
   NAV_ID,
@@ -15,10 +17,8 @@ import {
   DEFAULT_MAX_CHUNK_LENGTH,
   DEFAULT_AI_SYSTEM_PROMPT,
   DEFAULT_MAX_HISTORY_PER_CHAT,
-  TAPBACK_MAP,
-  TAPBACK_REMOVAL_OFFSET,
 } from './src/shared/constants.js';
-import type { BlueBubblesPluginConfig, AIReplyConfig, ChunkConfig, NormalizedMessage, NormalizedReaction, ReactionType } from './src/shared/types.js';
+import type { BlueBubblesPluginConfig, AIReplyConfig, ChunkConfig, NormalizedMessage } from './src/shared/types.js';
 
 type PluginAPI = {
   pluginName: string;
@@ -61,7 +61,7 @@ type PluginAPI = {
   };
   agent: {
     generate: (options: {
-      messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
+      messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string | unknown[] }>;
       modelKey?: string;
       profileKey?: string;
       reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
@@ -77,6 +77,15 @@ type PluginAPI = {
   };
   onAction: (targetId: string, handler: (action: string, data?: unknown) => void | Promise<void>) => void;
   fetch: typeof globalThis.fetch;
+  tools: {
+    register: (tools: Array<{
+      name: string;
+      description: string;
+      inputSchema: unknown;
+      execute: (input: unknown, context?: unknown) => Promise<unknown>;
+    }>) => void;
+    unregister: (toolNames: string[]) => void;
+  };
 };
 
 let client: BlueBubblesClient | null = null;
@@ -111,120 +120,6 @@ function getChunkConfig(config: BlueBubblesPluginConfig): ChunkConfig {
     maxLength: config.chunking?.maxLength ?? DEFAULT_MAX_CHUNK_LENGTH,
     splitMode: config.chunking?.splitMode ?? 'sentence',
   };
-}
-
-const VALID_REACTION_NAMES = new Set(['love', 'like', 'dislike', 'laugh', 'emphasize', 'question']);
-
-function isReactionMessage(raw: any): boolean {
-  if (!raw?.associatedMessageGuid) return false;
-  const assocType = raw.associatedMessageType;
-  if (assocType == null) return false;
-  // BB can return either a string name ("like") or an integer (2001)
-  if (typeof assocType === 'string') {
-    const name = assocType.replace(/^-/, '').toLowerCase();
-    return VALID_REACTION_NAMES.has(name);
-  }
-  if (typeof assocType === 'number') {
-    const abs = Math.abs(assocType);
-    return abs >= 2000 && abs <= 3005;
-  }
-  return false;
-}
-
-function extractReactionInfo(raw: any): { type: string; isRemoval: boolean } | null {
-  const assocType = raw.associatedMessageType;
-  if (typeof assocType === 'string') {
-    const isRemoval = assocType.startsWith('-');
-    const name = assocType.replace(/^-/, '').toLowerCase();
-    if (VALID_REACTION_NAMES.has(name)) return { type: name, isRemoval };
-    return null;
-  }
-  if (typeof assocType === 'number') {
-    const abs = Math.abs(assocType);
-    const isRemoval = assocType >= TAPBACK_REMOVAL_OFFSET + 2000;
-    const baseType = isRemoval ? abs - TAPBACK_REMOVAL_OFFSET : abs;
-    const name = TAPBACK_MAP[baseType];
-    if (name) return { type: name, isRemoval };
-    return null;
-  }
-  return null;
-}
-
-function extractTargetGuid(associatedMessageGuid: string): string {
-  let target = associatedMessageGuid;
-  const slashIdx = target.indexOf('/');
-  if (slashIdx >= 0) {
-    target = target.slice(slashIdx + 1);
-  } else if (target.startsWith('bp:')) {
-    target = target.slice(3);
-  }
-  return target;
-}
-
-function processMessagesWithReactions(
-  normalizedMessages: NormalizedMessage[],
-  rawBBMessages: any[],
-): NormalizedMessage[] {
-  // Build map of normalized messages by guid
-  const byGuid = new Map<string, NormalizedMessage>();
-  const reactionRaws: any[] = [];
-
-  // Identify which raw messages are reactions
-  for (const raw of rawBBMessages) {
-    if (isReactionMessage(raw)) {
-      reactionRaws.push(raw);
-    }
-  }
-
-  // Build set of reaction message GUIDs so we can exclude them from display
-  const reactionGuids = new Set(reactionRaws.map((r: any) => r.guid));
-
-  // Add non-reaction messages to the map
-  for (const msg of normalizedMessages) {
-    if (!reactionGuids.has(msg.guid)) {
-      byGuid.set(msg.guid, { ...msg, reactions: [...msg.reactions] });
-    }
-  }
-
-  // Attach reactions to their targets
-  for (const raw of reactionRaws) {
-    const targetGuid = extractTargetGuid(raw.associatedMessageGuid ?? '');
-    const info = extractReactionInfo(raw);
-    if (!info) continue;
-
-    const target = byGuid.get(targetGuid);
-    if (!target) {
-      continue;
-    }
-
-    const sender = raw.handle?.address ?? (raw.isFromMe ? 'me' : 'unknown');
-    const reaction: NormalizedReaction = { type: info.type as ReactionType, sender, isFromMe: raw.isFromMe };
-
-    if (info.isRemoval) {
-      target.reactions = target.reactions.filter(
-        (r) => !(r.type === reaction.type && r.sender === reaction.sender),
-      );
-    } else {
-      const exists = target.reactions.some(
-        (r) => r.type === reaction.type && r.sender === reaction.sender,
-      );
-      if (!exists) {
-        target.reactions.push(reaction);
-      }
-    }
-  }
-
-  // Return messages in chronological order (filtering out reaction messages)
-  const result: NormalizedMessage[] = [];
-  for (const msg of normalizedMessages) {
-    const processed = byGuid.get(msg.guid);
-    if (processed) result.push(processed);
-  }
-
-  // Sort by date ascending to ensure correct chronological order
-  result.sort((a, b) => a.date - b.date);
-
-  return result;
 }
 
 function isConfigured(config: BlueBubblesPluginConfig): boolean {
@@ -639,6 +534,19 @@ export async function activate(api: PluginAPI): Promise<void> {
   // Register action handlers
   api.onAction(`panel:${PANEL_ID}`, (action, data) => handlePanelAction(api, action, data));
   api.onAction('settings:BlueBubblesSettings', (action, data) => handleSettingsAction(api, action, data));
+
+  // Register AI tools
+  const tools = buildBlueBubblesTools({
+    getClient: () => client,
+    getContacts: () => contacts,
+    getStateManager: () => stateManager,
+    getChatHistory: () => chatHistory,
+    getConfig: () => getConfig(api),
+    getChunkConfig: () => getChunkConfig(getConfig(api)),
+    log: api.log,
+    loadChats: () => loadChats(api),
+  });
+  api.tools.register(tools as any);
 
   // Watch for config changes
   unsubConfig = api.config.onChanged(() => {

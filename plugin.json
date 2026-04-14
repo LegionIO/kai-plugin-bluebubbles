@@ -9,6 +9,7 @@
     "config:read",
     "config:write",
     "state:publish",
+    "tools:register",
     "ui:panel",
     "ui:navigation",
     "ui:settings",
