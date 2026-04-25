@@ -508,7 +508,7 @@ export async function activate(api: PluginAPI): Promise<void> {
   // Register UI components
   api.ui.registerPanelView({
     id: PANEL_ID,
-    title: 'Messages',
+    title: 'BlueBubbles',
     visible: true,
     width: 'full',
   });
