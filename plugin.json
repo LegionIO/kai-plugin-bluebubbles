@@ -1,7 +1,7 @@
 {
   "name": "bluebubbles",
   "displayName": "BlueBubbles",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "iMessage & SMS integration via BlueBubbles server with AI-powered auto-reply",
   "permissions": [
     "config:read",
