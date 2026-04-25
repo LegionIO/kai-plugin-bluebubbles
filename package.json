@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "node esbuild.config.mjs",
-    "watch": "node esbuild.config.mjs --watch"
+    "dev": "node esbuild.config.mjs --dev --watch"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

@@ -2,11 +2,22 @@ import esbuild from 'esbuild';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 import { createRequire } from 'module';
-import { copyFileSync, mkdirSync } from 'fs';
+import { copyFileSync, mkdirSync, readFileSync } from 'fs';
+import { homedir } from 'os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const isWatch = process.argv.includes('--watch');
+const isDev = process.argv.includes('--dev');
+
+// Read plugin name from plugin.json
+const manifest = JSON.parse(readFileSync(resolve(__dirname, 'plugin.json'), 'utf-8'));
+const pluginName = manifest.name;
+
+// Determine output directory
+const outputDir = isDev
+  ? resolve(homedir(), '.kai', 'plugins', pluginName)
+  : resolve(__dirname, 'dist');
 
 // Built-in Node.js modules that should not be resolved
 const builtins = new Set([
@@ -39,32 +50,55 @@ const localNodeModulesPlugin = {
   },
 };
 
-const buildOptions = {
+const backendOptions = {
   entryPoints: ['./src/backend/index.ts'],
   bundle: true,
   platform: 'node',
   format: 'esm',
-  outfile: './dist/backend.js',
+  outfile: resolve(outputDir, 'backend.js'),
   external: [], // Bundle everything, including cron-parser
   sourcemap: true,
   target: 'node18',
   plugins: [localNodeModulesPlugin],
 };
 
-// Ensure dist directory exists
-mkdirSync(resolve(__dirname, 'dist'), { recursive: true });
+const frontendOptions = {
+  entryPoints: ['./src/frontend/index.ts'],
+  bundle: true,
+  platform: 'browser',
+  format: 'esm',
+  outfile: resolve(outputDir, 'frontend.js'),
+  sourcemap: true,
+  target: 'es2020',
+  jsx: 'transform',
+  jsxFactory: 'React.createElement',
+  jsxFragment: 'React.Fragment',
+  plugins: [localNodeModulesPlugin],
+};
+
+// Ensure output directory exists
+mkdirSync(outputDir, { recursive: true });
+
+// Copy plugin.json to output directory
+copyFileSync(
+  resolve(__dirname, 'plugin.json'),
+  resolve(outputDir, 'plugin.json')
+);
 
 if (isWatch) {
-  const ctx = await esbuild.context(buildOptions);
-  await ctx.watch();
-  console.log('Watching for changes...');
+  const backendCtx = await esbuild.context(backendOptions);
+  const frontendCtx = await esbuild.context(frontendOptions);
+  await Promise.all([backendCtx.watch(), frontendCtx.watch()]);
+  console.log(`Watching for changes... (output: ${outputDir})`);
 } else {
-  await esbuild.build(buildOptions).catch(() => process.exit(1));
+  await Promise.all([
+    esbuild.build(backendOptions),
+    esbuild.build(frontendOptions)
+  ]).catch(() => process.exit(1));
 
-  // Copy frontend to dist
-  copyFileSync(
-    resolve(__dirname, 'src/frontend/index.ts'),
-    resolve(__dirname, 'dist/frontend.js')
-  );
-  console.log('Built backend.js and copied frontend.ts to dist/');
+  if (isDev) {
+    console.log(`Built to ~/.kai/plugins/${pluginName}/`);
+  } else {
+    console.log('Built backend.js and frontend.js to dist/');
+  }
 }

@@ -155,12 +155,10 @@ jobs:
           version="${{ steps.version.outputs.version }}"
           artifact_name="${plugin_name}-v${version}.tar.gz"
 
-          # Package plugin.json and dist/ folder
-          files=("plugin.json" "dist")
-
-          # Create tarball
-          echo "Packaging files: ${files[@]}"
-          tar -czf "$artifact_name" "${files[@]}"
+          # Package plugin files from dist/
+          cd dist
+          tar -czf "../$artifact_name" .
+          cd ..
 
           echo "artifact=$artifact_name" >> "$GITHUB_OUTPUT"
           echo "Created artifact: $artifact_name ($(du -h "$artifact_name" | cut -f1))"
