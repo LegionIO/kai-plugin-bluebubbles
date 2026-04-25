@@ -1,7 +1,7 @@
 {
   "name": "bluebubbles",
   "displayName": "BlueBubbles",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "iMessage & SMS integration via BlueBubbles server with AI-powered auto-reply",
   "main": "main.js",
   "renderer": "renderer.js",
@@ -53,19 +53,41 @@
       "aiReply": {
         "type": "object",
         "properties": {
-          "enabled": { "type": "boolean", "default": false },
-          "systemPrompt": { "type": "string" },
-          "dmBehavior": { "type": "string", "default": "smart" },
-          "groupBehavior": { "type": "string", "default": "smart" },
-          "maxHistoryPerChat": { "type": "number", "default": 50 },
-          "modelOverride": { "type": "string" }
+          "enabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "systemPrompt": {
+            "type": "string"
+          },
+          "dmBehavior": {
+            "type": "string",
+            "default": "smart"
+          },
+          "groupBehavior": {
+            "type": "string",
+            "default": "smart"
+          },
+          "maxHistoryPerChat": {
+            "type": "number",
+            "default": 50
+          },
+          "modelOverride": {
+            "type": "string"
+          }
         }
       },
       "chunking": {
         "type": "object",
         "properties": {
-          "maxLength": { "type": "number", "default": 4000 },
-          "splitMode": { "type": "string", "default": "sentence" }
+          "maxLength": {
+            "type": "number",
+            "default": 4000
+          },
+          "splitMode": {
+            "type": "string",
+            "default": "sentence"
+          }
         }
       },
       "contacts": {
