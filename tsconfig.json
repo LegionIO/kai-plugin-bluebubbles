@@ -4,8 +4,8 @@
     "module": "ES2022",
     "moduleResolution": "bundler",
     "lib": ["ES2022"],
-    "outDir": ".",
-    "rootDir": ".",
+    "outDir": "src",
+    "rootDir": "src",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -16,13 +16,13 @@
     "paths": {}
   },
   "include": [
-    "main.ts",
+    "src/backend.ts",
     "src/main/**/*",
     "src/shared/**/*"
   ],
   "exclude": [
     "node_modules",
-    "renderer.tsx",
+    "src/frontend/**/*",
     "src/renderer/**/*"
   ]
 }

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc && [ -f main.js ] && mv main.js backend.js || true",
+    "build": "tsc && mkdir -p dist && mv src/backend.js dist/backend.js && cp src/frontend/index.js dist/frontend.js",
     "watch": "tsc --watch"
   },
   "devDependencies": {
