@@ -3,8 +3,8 @@
   "displayName": "BlueBubbles",
   "version": "0.2.1",
   "description": "iMessage & SMS integration via BlueBubbles server with AI-powered auto-reply",
-  "main": "main.js",
-  "renderer": "renderer.js",
+  "main": "backend.js",
+  "renderer": "frontend.js",
   "permissions": [
     "config:read",
     "config:write",
