@@ -11,7 +11,6 @@ import {
   PANEL_ID,
   NAV_ID,
   SETTINGS_ID,
-  MESSAGE_BUBBLE_ICON_SVG,
   DEFAULT_WEBHOOK_PORT,
   DEFAULT_WEBHOOK_HOST,
   DEFAULT_MAX_CHUNK_LENGTH,
@@ -518,7 +517,7 @@ export async function activate(api: PluginAPI): Promise<void> {
   api.ui.registerNavigationItem({
     id: NAV_ID,
     label: 'Messages',
-    icon: { svg: MESSAGE_BUBBLE_ICON_SVG },
+    icon: { lucide: 'message-circle' },
     visible: true,
     priority: 10,
     target: { type: 'panel', panelId: PANEL_ID },

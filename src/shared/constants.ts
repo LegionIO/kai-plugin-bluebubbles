@@ -19,8 +19,6 @@ export const TAPBACK_MAP: Record<number, string> = {
 
 export const TAPBACK_REMOVAL_OFFSET = 1000;
 
-export const MESSAGE_BUBBLE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g transform="translate(24,0) scale(-1,1)"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></g></svg>`;
-
 export const DEFAULT_AI_SYSTEM_PROMPT = `You are a helpful AI assistant responding via iMessage. Keep your responses conversational, concise, and natural — like a real text message conversation.
 
 Guidelines:

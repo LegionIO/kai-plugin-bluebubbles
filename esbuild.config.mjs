@@ -63,8 +63,8 @@ if (isWatch) {
 
   // Copy frontend to dist
   copyFileSync(
-    resolve(__dirname, 'src/frontend/index.js'),
+    resolve(__dirname, 'src/frontend/index.ts'),
     resolve(__dirname, 'dist/frontend.js')
   );
-  console.log('Built backend.js and copied frontend.js to dist/');
+  console.log('Built backend.js and copied frontend.ts to dist/');
 }

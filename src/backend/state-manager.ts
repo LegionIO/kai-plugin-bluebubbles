@@ -6,7 +6,7 @@ import type {
   BBServerInfo,
   ConnectionStatus,
 } from '../shared/types.js';
-import { NAV_ID, MESSAGE_BUBBLE_ICON_SVG } from '../shared/constants.js';
+import { NAV_ID } from '../shared/constants.js';
 
 type PluginStateAPI = {
   get: () => Record<string, unknown>;
@@ -18,7 +18,7 @@ type PluginUIAPI = {
   registerNavigationItem: (descriptor: {
     id: string;
     label: string;
-    icon?: string | { svg: string };
+    icon?: { lucide: string } | { svg: string };
     visible: boolean;
     priority?: number;
     badge?: string | number;
@@ -267,7 +267,7 @@ export class StateManager {
     this.uiApi.registerNavigationItem({
       id: NAV_ID,
       label: 'Messages',
-      icon: { svg: MESSAGE_BUBBLE_ICON_SVG },
+      icon: { lucide: 'message-circle' },
       visible: true,
       priority: 10,
       badge,
