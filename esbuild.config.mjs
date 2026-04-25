@@ -32,19 +32,21 @@ const localNodeModulesPlugin = {
   name: 'local-node-modules',
   setup(build) {
     build.onResolve({ filter: /^[^./]/ }, args => {
+      const packageName = args.path.startsWith('@')
+        ? args.path.split('/').slice(0, 2).join('/')
+        : args.path.split('/')[0];
+
       // Skip built-in modules
-      if (builtins.has(args.path.split('/')[0])) {
-        return null;
-      }
+      if (builtins.has(packageName)) return null;
 
       try {
-        // Try to resolve from local node_modules
+        // Use require.resolve with explicit paths to bypass Yarn PnP
         const resolved = require.resolve(args.path, {
-          paths: [resolve(__dirname, 'node_modules')]
+          paths: [resolve(__dirname, 'node_modules', '..')]
         });
         return { path: resolved };
-      } catch (e) {
-        return null; // Let esbuild handle it
+      } catch {
+        return null;
       }
     });
   },
