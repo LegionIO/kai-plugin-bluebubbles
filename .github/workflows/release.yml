@@ -1,0 +1,226 @@
+name: Release Plugin
+
+on:
+  workflow_dispatch:
+    inputs:
+      verbump:
+        description: 'Version bump to apply'
+        required: true
+        default: patch
+        type: choice
+        options:
+          - none
+          - major
+          - minor
+          - patch
+
+concurrency:
+  group: plugin-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Get current version
+        id: current_version
+        run: |
+          current=$(jq -r '.version' plugin.json)
+          echo "version=$current" >> "$GITHUB_OUTPUT"
+          echo "Current version: $current"
+
+      - name: Bump version
+        id: bump_version
+        if: ${{ inputs.verbump != 'none' }}
+        run: |
+          current="${{ steps.current_version.outputs.version }}"
+          IFS='.' read -r major minor patch <<< "$current"
+
+          case "${{ inputs.verbump }}" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+          esac
+
+          new_version="${major}.${minor}.${patch}"
+          echo "version=$new_version" >> "$GITHUB_OUTPUT"
+          echo "New version: $new_version"
+
+          # Update plugin.json
+          jq ".version = \"$new_version\"" plugin.json > plugin.json.tmp
+          mv plugin.json.tmp plugin.json
+
+          # Update package.json if it exists
+          if [ -f "package.json" ]; then
+            jq ".version = \"$new_version\"" package.json > package.json.tmp
+            mv package.json.tmp package.json
+          fi
+
+      - name: Set release version
+        id: version
+        run: |
+          if [ "${{ inputs.verbump }}" = "none" ]; then
+            version="${{ steps.current_version.outputs.version }}"
+          else
+            version="${{ steps.bump_version.outputs.version }}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "Release version: $version"
+
+      - name: Commit version bump
+        if: ${{ inputs.verbump != 'none' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add plugin.json
+          [ -f "package.json" ] && git add package.json
+
+          if ! git diff --cached --quiet; then
+            git commit -m "release: v${{ steps.version.outputs.version }}"
+            git push origin main
+          else
+            echo "No version changes to commit"
+          fi
+
+      - name: Check if tag exists
+        id: check_tag
+        run: |
+          git fetch --tags
+          if git show-ref --verify --quiet "refs/tags/${{ steps.version.outputs.tag }}"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Tag ${{ steps.version.outputs.tag }} already exists"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Tag ${{ steps.version.outputs.tag }} does not exist"
+          fi
+
+      - name: Create and push tag
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          git tag "${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Install dependencies
+        if: ${{ hashFiles('package.json') != '' }}
+        run: |
+          if [ -f "package.json" ]; then
+            if jq -e '.scripts.build' package.json >/dev/null 2>&1; then
+              echo "Installing dependencies for build..."
+              npm install
+            fi
+          fi
+
+      - name: Build plugin
+        if: ${{ hashFiles('package.json') != '' }}
+        run: |
+          if [ -f "package.json" ]; then
+            if jq -e '.scripts.build' package.json >/dev/null 2>&1; then
+              echo "Building plugin..."
+              npm run build
+            else
+              echo "No build script found, skipping build"
+            fi
+          fi
+
+      - name: Get plugin name
+        id: plugin_info
+        run: |
+          plugin_name=$(jq -r '.name' plugin.json)
+          echo "name=$plugin_name" >> "$GITHUB_OUTPUT"
+          echo "Plugin name: $plugin_name"
+
+      - name: Package plugin
+        id: package
+        run: |
+          plugin_name="${{ steps.plugin_info.outputs.name }}"
+          version="${{ steps.version.outputs.version }}"
+          artifact_name="${plugin_name}-v${version}.tar.gz"
+
+          # Create list of files to package
+          files=("plugin.json")
+
+          # Add main entry point
+          if [ -f "main.js" ]; then
+            files+=("main.js")
+          elif [ -f "main.mjs" ]; then
+            files+=("main.mjs")
+          fi
+
+          # Add renderer entry point
+          if [ -f "renderer.js" ]; then
+            files+=("renderer.js")
+          elif [ -f "renderer.mjs" ]; then
+            files+=("renderer.mjs")
+          elif [ -f "renderer.ts" ]; then
+            files+=("renderer.ts")
+          fi
+
+          # Add main directory if it exists (for skynet)
+          if [ -d "main" ]; then
+            files+=("main")
+          fi
+
+          # Add renderer directory if it exists (for skynet)
+          if [ -d "renderer" ]; then
+            files+=("renderer")
+          fi
+
+          # Add src directory if it exists and no build output
+          if [ -d "src" ] && [ ! -f "main.js" ]; then
+            files+=("src")
+          fi
+
+          # Create tarball
+          echo "Packaging files: ${files[@]}"
+          tar -czf "$artifact_name" "${files[@]}"
+
+          echo "artifact=$artifact_name" >> "$GITHUB_OUTPUT"
+          echo "Created artifact: $artifact_name ($(du -h "$artifact_name" | cut -f1))"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ steps.version.outputs.tag }}"
+          artifact="${{ steps.package.outputs.artifact }}"
+
+          # Check if release already exists
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists, deleting and recreating..."
+            gh release delete "$tag" --yes
+          fi
+
+          gh release create "$tag" "$artifact" \
+            --title "$tag" \
+            --generate-notes \
+            --verify-tag
+
+      - name: Summary
+        run: |
+          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Plugin**: ${{ steps.plugin_info.outputs.name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag**: ${{ steps.version.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Artifact**: ${{ steps.package.outputs.artifact }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Release created successfully! 🎉" >> $GITHUB_STEP_SUMMARY
