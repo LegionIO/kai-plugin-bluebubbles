@@ -1,12 +1,12 @@
-import { BlueBubblesClient } from './main/bb-client.js';
-import { StateManager } from './main/state-manager.js';
-import { AIReplyEngine } from './main/ai-reply.js';
-import { ContactBook } from './main/contacts.js';
-import { ChatHistoryManager } from './main/chat-history.js';
-import { createWebhookHandler } from './main/webhook-handler.js';
-import { normalizeChat, normalizeMessage } from './main/message-normalizer.js';
-import { processMessagesWithReactions } from './main/reaction-utils.js';
-import { buildBlueBubblesTools } from './main/tools.js';
+import { BlueBubblesClient } from './bb-client.js';
+import { StateManager } from './state-manager.js';
+import { AIReplyEngine } from './ai-reply.js';
+import { ContactBook } from './contacts.js';
+import { ChatHistoryManager } from './chat-history.js';
+import { createWebhookHandler } from './webhook-handler.js';
+import { normalizeChat, normalizeMessage } from './message-normalizer.js';
+import { processMessagesWithReactions } from './reaction-utils.js';
+import { buildBlueBubblesTools } from './tools.js';
 import {
   PANEL_ID,
   NAV_ID,
@@ -17,8 +17,8 @@ import {
   DEFAULT_MAX_CHUNK_LENGTH,
   DEFAULT_AI_SYSTEM_PROMPT,
   DEFAULT_MAX_HISTORY_PER_CHAT,
-} from './shared/constants.js';
-import type { BlueBubblesPluginConfig, AIReplyConfig, ChunkConfig, NormalizedMessage } from './shared/types.js';
+} from '../shared/constants.js';
+import type { BlueBubblesPluginConfig, AIReplyConfig, ChunkConfig, NormalizedMessage } from '../shared/types.js';
 
 type PluginAPI = {
   pluginName: string;

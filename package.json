@@ -4,12 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc && mkdir -p dist && mv src/backend.js dist/backend.js && cp src/frontend/index.js dist/frontend.js",
-    "watch": "tsc --watch"
+    "build": "node esbuild.config.mjs",
+    "watch": "node esbuild.config.mjs --watch"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
     "@types/node": "^22.0.0",
-    "@types/react": "^19.0.0"
+    "@types/react": "^19.0.0",
+    "esbuild": "0.28.0",
+    "typescript": "^5.7.0"
   }
 }

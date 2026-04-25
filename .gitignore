@@ -1,7 +1,2 @@
 node_modules/
 dist/
-history.json
-*.js.map
-*.d.ts
-src/**/*.js
-!src/frontend/index.js
