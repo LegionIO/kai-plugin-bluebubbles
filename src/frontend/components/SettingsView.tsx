@@ -1,5 +1,5 @@
-import { useState, useCallback } from './hooks';
-import { Dropdown, AutoManualToggle, useModelCatalog, useProfileCatalog } from './components/ModelProfileSelectors';
+import { useState, useCallback } from '../hooks';
+import { Dropdown, AutoManualToggle, useModelCatalog, useProfileCatalog } from './ModelProfileSelectors';
 
 const h = (...args: any[]) => (globalThis as any).React.createElement(...args);
 
@@ -76,7 +76,7 @@ function Select({ value, options, onChange }: { value: string; options: { value:
   );
 }
 
-export function BlueBubblesSettings({
+export function SettingsView({
   onAction,
   pluginConfig,
   pluginState,

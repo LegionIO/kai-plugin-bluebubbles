@@ -16,7 +16,7 @@ type PluginComponentProps = {
   setPluginConfig?: (path: string, value: unknown) => Promise<void>;
 };
 
-export function BlueBubblesPanel({
+export function PanelView({
   onAction,
   pluginState,
   pluginConfig,

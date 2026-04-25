@@ -36,9 +36,9 @@ type PluginAPI = {
     emitEvent: (eventName: string, data?: unknown) => void;
   };
   ui: {
-    registerPanel: (descriptor: Record<string, unknown>) => void;
+    registerPanelView: (descriptor: Record<string, unknown>) => void;
     registerNavigationItem: (descriptor: Record<string, unknown>) => void;
-    registerSettingsSection: (descriptor: Record<string, unknown>) => void;
+    registerSettingsView: (descriptor: Record<string, unknown>) => void;
     showBanner: (descriptor: Record<string, unknown>) => void;
     hideBanner: (id: string) => void;
   };
@@ -506,9 +506,8 @@ export async function activate(api: PluginAPI): Promise<void> {
   stateManager.setContacts(contacts.getAll());
 
   // Register UI components
-  api.ui.registerPanel({
+  api.ui.registerPanelView({
     id: PANEL_ID,
-    component: 'BlueBubblesPanel',
     title: 'Messages',
     visible: true,
     width: 'full',
@@ -523,16 +522,15 @@ export async function activate(api: PluginAPI): Promise<void> {
     target: { type: 'panel', panelId: PANEL_ID },
   });
 
-  api.ui.registerSettingsSection({
+  api.ui.registerSettingsView({
     id: SETTINGS_ID,
     label: 'BlueBubbles',
-    component: 'BlueBubblesSettings',
     priority: 50,
   });
 
   // Register action handlers
   api.onAction(`panel:${PANEL_ID}`, (action, data) => handlePanelAction(api, action, data));
-  api.onAction('settings:BlueBubblesSettings', (action, data) => handleSettingsAction(api, action, data));
+  api.onAction(`settings:${SETTINGS_ID}`, (action, data) => handleSettingsAction(api, action, data));
 
   // Register AI tools
   const tools = buildBlueBubblesTools({
