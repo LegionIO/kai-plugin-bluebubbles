@@ -4,6 +4,7 @@
   "version": "0.2.6",
   "description": "iMessage & SMS integration via BlueBubbles server with AI-powered auto-reply",
   "author": "Kyle Boyer",
+  "authorGithub": "KyleBoyer",
   "permissions": [
     "config:read",
     "config:write",
