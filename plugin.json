@@ -21,8 +21,6 @@
     "conversations:write",
     "agent:backend"
   ],
-  "priority": 50,
-  "required": false,
   "configSchema": {
     "type": "object",
     "properties": {
