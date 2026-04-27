@@ -32,6 +32,9 @@ const localNodeModulesPlugin = {
   name: 'local-node-modules',
   setup(build) {
     build.onResolve({ filter: /^[^./]/ }, args => {
+      // Skip node: protocol prefixed modules
+      if (args.path.startsWith('node:')) return null;
+
       const packageName = args.path.startsWith('@')
         ? args.path.split('/').slice(0, 2).join('/')
         : args.path.split('/')[0];
