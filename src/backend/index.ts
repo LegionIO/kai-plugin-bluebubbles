@@ -515,8 +515,6 @@ export async function activate(api: PluginAPI): Promise<void> {
 
   api.ui.registerNavigationItem({
     id: NAV_ID,
-    label: 'Messages',
-    icon: { lucide: 'message-circle' },
     visible: true,
     priority: 10,
     target: { type: 'panel', panelId: PANEL_ID },
