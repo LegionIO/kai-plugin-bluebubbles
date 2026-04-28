@@ -87,10 +87,48 @@ export function ThreadView({
   const [contactNameInput, setContactNameInput] = useState('');
   const [showThreadSettings, setShowThreadSettings] = useState(false);
   const autoScrollRef = useRef(true);
+  const skipNextAutoScrollRef = useRef(false);
+  const smoothScrollFrameRef = useRef<number | null>(null);
+  const smoothScrollingRef = useRef(false);
 
-  const scrollToBottom = useCallback(() => {
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const scroller = scrollRef.current;
     if (!scroller) return;
+
+    if (smoothScrollFrameRef.current !== null) {
+      cancelAnimationFrame(smoothScrollFrameRef.current);
+      smoothScrollFrameRef.current = null;
+    }
+
+    const target = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+
+    if (behavior === 'smooth') {
+      const start = scroller.scrollTop;
+      const distance = target - start;
+      const duration = 420;
+      const startedAt = performance.now();
+      smoothScrollingRef.current = true;
+
+      const step = (now: number) => {
+        const progress = Math.min(1, (now - startedAt) / duration);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop = start + distance * eased;
+        }
+
+        if (progress < 1) {
+          smoothScrollFrameRef.current = requestAnimationFrame(step);
+        } else {
+          smoothScrollFrameRef.current = null;
+          smoothScrollingRef.current = false;
+          autoScrollRef.current = true;
+          setAutoScroll(true);
+        }
+      };
+
+      smoothScrollFrameRef.current = requestAnimationFrame(step);
+      return;
+    }
 
     scroller.scrollTop = scroller.scrollHeight;
     requestAnimationFrame(() => {
@@ -111,6 +149,10 @@ export function ThreadView({
 
   useEffect(() => {
     if (autoScroll) {
+      if (skipNextAutoScrollRef.current) {
+        skipNextAutoScrollRef.current = false;
+        return;
+      }
       scrollToBottom();
     }
   }, [chat.guid, messages.length, autoScroll, scrollToBottom]);
@@ -123,6 +165,8 @@ export function ThreadView({
 
   const handleScroll = useCallback(() => {
     if (!scrollRef.current) return;
+    if (smoothScrollingRef.current) return;
+
     const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
     const atBottom = scrollHeight - scrollTop - clientHeight < 100;
     autoScrollRef.current = atBottom;
@@ -371,8 +415,9 @@ export function ThreadView({
               type: 'button',
               onClick: () => {
                 autoScrollRef.current = true;
+                skipNextAutoScrollRef.current = true;
                 setAutoScroll(true);
-                scrollToBottom();
+                scrollToBottom('smooth');
               },
               className: 'rounded-full bg-muted/80 px-3 py-1 text-xs text-muted-foreground shadow-sm backdrop-blur-sm hover:bg-muted',
               style: { pointerEvents: 'auto' },

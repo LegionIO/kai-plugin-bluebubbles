@@ -173,7 +173,10 @@ export function ComposeBar({ onSend, sending, replyTo, onCancelReply, onTyping, 
     }),
 
     // Input area
-    h('div', { className: 'flex items-end gap-2 p-3' },
+    h('div', {
+      className: 'flex items-center gap-2',
+      style: { padding: '10px 12px 22px' },
+    },
       // Attach button
       allowAttach
         ? h('button', {

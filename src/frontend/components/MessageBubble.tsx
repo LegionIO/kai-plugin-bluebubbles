@@ -1,4 +1,4 @@
-import { useState } from '../hooks';
+import { useRef, useState } from '../hooks';
 import { AttachmentPreview } from './AttachmentPreview';
 
 const h = (...args: any[]) => (globalThis as any).React.createElement(...args);
@@ -43,6 +43,7 @@ export function MessageBubble({
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(message.text);
   const [hovered, setHovered] = useState(false);
+  const hoverHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isMe = message.isFromMe;
 
@@ -82,6 +83,26 @@ export function MessageBubble({
     setEditing(false);
   };
 
+  const clearHoverHideTimer = () => {
+    if (hoverHideTimerRef.current) {
+      clearTimeout(hoverHideTimerRef.current);
+      hoverHideTimerRef.current = null;
+    }
+  };
+
+  const showHoverControls = () => {
+    clearHoverHideTimer();
+    setHovered(true);
+  };
+
+  const hideHoverControls = () => {
+    clearHoverHideTimer();
+    hoverHideTimerRef.current = setTimeout(() => {
+      setHovered(false);
+      setShowMenu(false);
+    }, 180);
+  };
+
   const reactions = (message.reactions ?? []) as any[];
   const reactionGroups: Record<string, { count: number; hasFromMe: boolean; senders: string[] }> = {};
   for (const r of reactions) {
@@ -92,6 +113,49 @@ export function MessageBubble({
     reactionGroups[r.type].senders.push(r.isFromMe ? 'You' : (r.sender || 'Someone'));
     if (r.isFromMe) reactionGroups[r.type].hasFromMe = true;
   }
+
+  const quickReactBar = hovered && !showMenu && !editing
+    ? h('div', {
+        style: {
+          position: 'absolute',
+          bottom: 'calc(100% + 4px)',
+          left: isMe ? '0' : 'auto',
+          right: isMe ? 'auto' : '0',
+          zIndex: 2,
+          display: 'flex',
+          gap: '1px',
+          whiteSpace: 'nowrap',
+          borderRadius: '12px',
+          padding: '2px 4px',
+          backgroundColor: 'var(--color-card, #fff)',
+          border: '1px solid var(--color-border, rgba(128,128,128,0.15))',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
+        },
+        onMouseEnter: showHoverControls,
+        onMouseLeave: hideHoverControls,
+      },
+        ['love', 'like', 'dislike', 'laugh', 'emphasize', 'question'].map((type) =>
+          h('button', {
+            key: type,
+            type: 'button',
+            onClick: (e: any) => { e.stopPropagation(); onReact(type); },
+            style: {
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '2px 3px',
+              fontSize: '13px',
+              lineHeight: 1,
+              borderRadius: '6px',
+              transition: 'background 0.15s',
+            },
+            onMouseOver: (e: any) => { e.currentTarget.style.background = 'var(--color-muted, #e5e7eb)'; },
+            onMouseOut: (e: any) => { e.currentTarget.style.background = 'none'; },
+            title: type.charAt(0).toUpperCase() + type.slice(1),
+          }, REACTION_EMOJI[type]),
+        ),
+      )
+    : null;
 
   return h('div', {
     style: {
@@ -111,99 +175,61 @@ export function MessageBubble({
         position: 'relative',
         minWidth: '40px',
       },
-      onMouseEnter: () => setHovered(true),
-      onMouseLeave: () => { setHovered(false); setShowMenu(false); },
+      onMouseEnter: showHoverControls,
+      onMouseLeave: hideHoverControls,
     },
 
-      // Quick react bar on hover
-      hovered && !showMenu && !editing
-        ? h('div', {
-            style: {
-              position: 'absolute',
-              top: '-28px',
-              right: isMe ? '8px' : 'auto',
-              left: isMe ? 'auto' : '8px',
-              zIndex: 2,
-              display: 'flex',
-              gap: '1px',
-              borderRadius: '12px',
-              padding: '2px 4px',
-              backgroundColor: 'var(--color-card, #fff)',
-              border: '1px solid var(--color-border, rgba(128,128,128,0.15))',
-              boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
-            },
-          },
-            ['love', 'like', 'dislike', 'laugh', 'emphasize', 'question'].map((type) =>
-              h('button', {
-                key: type,
-                type: 'button',
-                onClick: (e: any) => { e.stopPropagation(); onReact(type); },
-                style: {
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  padding: '2px 3px',
-                  fontSize: '13px',
-                  lineHeight: 1,
-                  borderRadius: '6px',
-                  transition: 'background 0.15s',
-                },
-                onMouseOver: (e: any) => { e.currentTarget.style.background = 'var(--color-muted, #e5e7eb)'; },
-                onMouseOut: (e: any) => { e.currentTarget.style.background = 'none'; },
-                title: type.charAt(0).toUpperCase() + type.slice(1),
-              }, REACTION_EMOJI[type]),
-            ),
-          )
-        : null,
       // Sender name (group chats, received messages, not grouped)
       !isMe && isGroup && !grouped
         ? h('span', { className: 'mb-0.5 ml-3 text-[11px] font-medium text-muted-foreground' }, message.senderName)
         : null,
 
       // Message bubble
-      h('div', {
-        onContextMenu: handleContextMenu,
-        style: isMe ? sentBubbleStyle : receivedBubbleStyle,
-        className: `relative ${borderRadius} px-3 py-2 text-sm break-words cursor-default`,
-      },
-        // Editing mode
-        editing
-          ? h('div', { className: 'flex flex-col gap-1' },
-              h('textarea', {
-                value: editText,
-                onChange: (e: any) => setEditText(e.target.value),
-                className: 'w-full resize-none rounded bg-white/20 p-1 text-sm outline-none',
-                rows: 2,
-                autoFocus: true,
-              }),
-              h('div', { className: 'flex gap-1 justify-end' },
-                h('button', {
-                  type: 'button',
-                  onClick: () => setEditing(false),
-                  className: 'rounded px-2 py-0.5 text-xs bg-white/20 hover:bg-white/30',
-                }, 'Cancel'),
-                h('button', {
-                  type: 'button',
-                  onClick: handleSubmitEdit,
-                  className: 'rounded px-2 py-0.5 text-xs bg-white/30 hover:bg-white/40 font-medium',
-                }, 'Save'),
+      h('div', { style: { position: 'relative', maxWidth: '100%' } },
+        quickReactBar,
+        h('div', {
+          onContextMenu: handleContextMenu,
+          style: isMe ? sentBubbleStyle : receivedBubbleStyle,
+          className: `relative ${borderRadius} px-3 py-2 text-sm break-words cursor-default`,
+        },
+          // Editing mode
+          editing
+            ? h('div', { className: 'flex flex-col gap-1' },
+                h('textarea', {
+                  value: editText,
+                  onChange: (e: any) => setEditText(e.target.value),
+                  className: 'w-full resize-none rounded bg-white/20 p-1 text-sm outline-none',
+                  rows: 2,
+                  autoFocus: true,
+                }),
+                h('div', { className: 'flex gap-1 justify-end' },
+                  h('button', {
+                    type: 'button',
+                    onClick: () => setEditing(false),
+                    className: 'rounded px-2 py-0.5 text-xs bg-white/20 hover:bg-white/30',
+                  }, 'Cancel'),
+                  h('button', {
+                    type: 'button',
+                    onClick: handleSubmitEdit,
+                    className: 'rounded px-2 py-0.5 text-xs bg-white/30 hover:bg-white/40 font-medium',
+                  }, 'Save'),
+                ),
+              )
+            : h('span', { style: { whiteSpace: 'pre-wrap' } },
+                message.text,
+                message.isEdited
+                  ? h('span', { className: 'ml-1 text-[10px] opacity-60' }, '(edited)')
+                  : null,
               ),
-            )
-          : h('span', { style: { whiteSpace: 'pre-wrap' } },
-              message.text,
-              message.isEdited
-                ? h('span', { className: 'ml-1 text-[10px] opacity-60' }, '(edited)')
-                : null,
-            ),
 
-        // Attachments
-        (message.attachments ?? []).length > 0
-          ? h('div', { className: 'mt-1.5 space-y-1' },
-              message.attachments.map((att: any) =>
-                h(AttachmentPreview, { key: att.guid, attachment: att, onLoad: onMediaLoad }),
-              ),
-            )
-          : null,
+          // Attachments
+          (message.attachments ?? []).length > 0
+            ? h('div', { className: 'mt-1.5 space-y-1' },
+                message.attachments.map((att: any) =>
+                  h(AttachmentPreview, { key: att.guid, attachment: att, onLoad: onMediaLoad }),
+                ),
+              )
+            : null,
 
         // Tool calls (when enabled)
         showToolCalls && message.toolCalls?.length > 0
@@ -253,6 +279,7 @@ export function MessageBubble({
               ),
             )
           : null,
+        ),
       ),
 
       // Reactions
