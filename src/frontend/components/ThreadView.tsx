@@ -86,17 +86,46 @@ export function ThreadView({
   const [editingContact, setEditingContact] = useState<string | null>(null);
   const [contactNameInput, setContactNameInput] = useState('');
   const [showThreadSettings, setShowThreadSettings] = useState(false);
+  const autoScrollRef = useRef(true);
+
+  const scrollToBottom = useCallback(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+
+    scroller.scrollTop = scroller.scrollHeight;
+    requestAnimationFrame(() => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
+    });
+  }, []);
 
   useEffect(() => {
-    if (autoScroll && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    autoScrollRef.current = autoScroll;
+  }, [autoScroll]);
+
+  useEffect(() => {
+    autoScrollRef.current = true;
+    setAutoScroll(true);
+  }, [chat.guid]);
+
+  useEffect(() => {
+    if (autoScroll) {
+      scrollToBottom();
     }
-  }, [messages.length, autoScroll]);
+  }, [chat.guid, messages.length, autoScroll, scrollToBottom]);
+
+  const handleMediaLoad = useCallback(() => {
+    if (autoScrollRef.current) {
+      scrollToBottom();
+    }
+  }, [scrollToBottom]);
 
   const handleScroll = useCallback(() => {
     if (!scrollRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
     const atBottom = scrollHeight - scrollTop - clientHeight < 100;
+    autoScrollRef.current = atBottom;
     setAutoScroll(atBottom);
 
     if (scrollTop < 50 && messages.length > 0 && !loadingMessages) {
@@ -230,106 +259,127 @@ export function ThreadView({
 
     // Messages area
     h('div', {
-      ref: scrollRef,
-      onScroll: handleScroll,
-      className: 'flex-1 overflow-y-auto px-4 py-3',
       style: {
+        position: 'relative',
         flex: '1 1 0',
         minHeight: 0,
-        overflowY: 'auto',
-        overscrollBehavior: 'contain',
+        overflow: 'hidden',
       },
     },
-      loadingMessages && messages.length === 0
-        ? h('div', { className: 'flex h-full items-center justify-center text-sm text-muted-foreground' }, 'Loading messages...')
-        : messages.map((msg: any, idx: number) => {
-            const prev = messages[idx - 1];
-            const showDate = shouldShowDateDivider(msg, prev);
-            const grouped = shouldGroupWithPrevious(msg, prev);
+      h('div', {
+        ref: scrollRef,
+        onScroll: handleScroll,
+        className: 'h-full overflow-y-auto px-4 py-3',
+        style: {
+          height: '100%',
+          minHeight: 0,
+          overflowY: 'auto',
+          overscrollBehavior: 'contain',
+        },
+      },
+        loadingMessages && messages.length === 0
+          ? h('div', { className: 'flex h-full items-center justify-center text-sm text-muted-foreground' }, 'Loading messages...')
+          : messages.map((msg: any, idx: number) => {
+              const prev = messages[idx - 1];
+              const showDate = shouldShowDateDivider(msg, prev);
+              const grouped = shouldGroupWithPrevious(msg, prev);
 
-            return h('div', { key: msg.guid },
-              showDate
-                ? h('div', { className: 'my-4 text-center text-[11px] font-medium text-muted-foreground/60' },
-                    formatDate(msg.date))
-                : null,
-              h(MessageBubble, {
-                message: msg,
-                isGroup: chat.isGroup,
-                grouped,
-                time: formatTime(msg.date),
-                privateApiEnabled,
-                showToolCalls: (threadSettings as any)?.showToolCalls ?? false,
-                onReact: (reactionType?: string) => {
-                  if (reactionType) {
-                    onSendReaction(msg.guid, reactionType);
-                  } else {
-                    setReactionTarget(msg.guid === reactionTarget ? null : msg.guid);
-                  }
-                },
-                onReply: () => onSetReplyTo(msg.guid),
-                onEdit: (text: string) => onEditMessage(msg.guid, text),
-                onUnsend: () => onUnsendMessage(msg.guid),
-              }),
-              reactionTarget === msg.guid
-                ? h(ReactionPicker, {
-                    onSelect: (reaction: string) => {
-                      onSendReaction(msg.guid, reaction);
-                      setReactionTarget(null);
-                    },
-                    onClose: () => setReactionTarget(null),
-                  })
-                : null,
-            );
-          }),
-
-      // Typing indicator
-      typingIndicator
-        ? h('div', { style: { display: 'flex', justifyContent: 'flex-end', padding: '8px 8px' } },
-            h('div', {
-              style: {
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '4px',
-                borderRadius: '16px',
-                padding: '8px 12px',
-                backgroundColor: '#3b82f6',
-              },
-            },
-              [0, 1, 2].map((i) =>
-                h('span', {
-                  key: i,
-                  style: {
-                    width: '6px',
-                    height: '6px',
-                    borderRadius: '50%',
-                    backgroundColor: 'rgba(255,255,255,0.7)',
-                    opacity: 0.6,
-                    animation: `bb-typing-bounce 1.4s ease-in-out ${i * 0.2}s infinite`,
+              return h('div', { key: msg.guid },
+                showDate
+                  ? h('div', { className: 'my-4 text-center text-[11px] font-medium text-muted-foreground/60' },
+                      formatDate(msg.date))
+                  : null,
+                h(MessageBubble, {
+                  message: msg,
+                  isGroup: chat.isGroup,
+                  grouped,
+                  time: formatTime(msg.date),
+                  privateApiEnabled,
+                  showToolCalls: (threadSettings as any)?.showToolCalls ?? false,
+                  onMediaLoad: handleMediaLoad,
+                  onReact: (reactionType?: string) => {
+                    if (reactionType) {
+                      onSendReaction(msg.guid, reactionType);
+                    } else {
+                      setReactionTarget(msg.guid === reactionTarget ? null : msg.guid);
+                    }
                   },
+                  onReply: () => onSetReplyTo(msg.guid),
+                  onEdit: (text: string) => onEditMessage(msg.guid, text),
+                  onUnsend: () => onUnsendMessage(msg.guid),
                 }),
+                reactionTarget === msg.guid
+                  ? h(ReactionPicker, {
+                      onSelect: (reaction: string) => {
+                        onSendReaction(msg.guid, reaction);
+                        setReactionTarget(null);
+                      },
+                      onClose: () => setReactionTarget(null),
+                    })
+                  : null,
+              );
+            }),
+
+        // Typing indicator
+        typingIndicator
+          ? h('div', { style: { display: 'flex', justifyContent: 'flex-end', padding: '8px 8px' } },
+              h('div', {
+                style: {
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  borderRadius: '16px',
+                  padding: '8px 12px',
+                  backgroundColor: '#3b82f6',
+                },
+              },
+                [0, 1, 2].map((i) =>
+                  h('span', {
+                    key: i,
+                    style: {
+                      width: '6px',
+                      height: '6px',
+                      borderRadius: '50%',
+                      backgroundColor: 'rgba(255,255,255,0.7)',
+                      opacity: 0.6,
+                      animation: `bb-typing-bounce 1.4s ease-in-out ${i * 0.2}s infinite`,
+                    },
+                  }),
+                ),
               ),
-            ),
-            // Inject keyframes via a style tag
-            h('style', null, `@keyframes bb-typing-bounce { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-4px); } }`),
+              // Inject keyframes via a style tag
+              h('style', null, `@keyframes bb-typing-bounce { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-4px); } }`),
+            )
+          : null,
+      ),
+
+      // Scroll to bottom button
+      !autoScroll
+        ? h('div', {
+            style: {
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              bottom: '12px',
+              zIndex: 15,
+              display: 'flex',
+              justifyContent: 'center',
+              pointerEvents: 'none',
+            },
+          },
+            h('button', {
+              type: 'button',
+              onClick: () => {
+                autoScrollRef.current = true;
+                setAutoScroll(true);
+                scrollToBottom();
+              },
+              className: 'rounded-full bg-muted/80 px-3 py-1 text-xs text-muted-foreground shadow-sm backdrop-blur-sm hover:bg-muted',
+              style: { pointerEvents: 'auto' },
+            }, 'Scroll to bottom'),
           )
         : null,
     ),
-
-    // Scroll to bottom button
-    !autoScroll
-      ? h('div', { className: 'flex justify-center -mt-10 relative z-10' },
-          h('button', {
-            type: 'button',
-            onClick: () => {
-              if (scrollRef.current) {
-                scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-              }
-              setAutoScroll(true);
-            },
-            className: 'rounded-full bg-muted/80 px-3 py-1 text-xs text-muted-foreground shadow-sm backdrop-blur-sm hover:bg-muted',
-          }, 'Scroll to bottom'),
-        )
-      : null,
 
     // Compose bar
     h(ComposeBar, {

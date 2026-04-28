@@ -14,6 +14,7 @@ type MessageBubbleProps = {
   onReply: () => void;
   onEdit: (text: string) => void;
   onUnsend: () => void;
+  onMediaLoad?: () => void;
 };
 
 const REACTION_EMOJI: Record<string, string> = {
@@ -36,6 +37,7 @@ export function MessageBubble({
   onReply,
   onEdit,
   onUnsend,
+  onMediaLoad,
 }: MessageBubbleProps) {
   const [showMenu, setShowMenu] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -117,9 +119,13 @@ export function MessageBubble({
       hovered && !showMenu && !editing
         ? h('div', {
             style: {
+              position: 'absolute',
+              top: '-28px',
+              right: isMe ? '8px' : 'auto',
+              left: isMe ? 'auto' : '8px',
+              zIndex: 2,
               display: 'flex',
               gap: '1px',
-              marginBottom: '2px',
               borderRadius: '12px',
               padding: '2px 4px',
               backgroundColor: 'var(--color-card, #fff)',
@@ -194,7 +200,7 @@ export function MessageBubble({
         (message.attachments ?? []).length > 0
           ? h('div', { className: 'mt-1.5 space-y-1' },
               message.attachments.map((att: any) =>
-                h(AttachmentPreview, { key: att.guid, attachment: att }),
+                h(AttachmentPreview, { key: att.guid, attachment: att, onLoad: onMediaLoad }),
               ),
             )
           : null,

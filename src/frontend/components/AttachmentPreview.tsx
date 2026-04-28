@@ -10,6 +10,7 @@ type AttachmentPreviewProps = {
     height?: number;
     downloadUrl: string;
   };
+  onLoad?: () => void;
 };
 
 function formatFileSize(bytes: number): string {
@@ -18,7 +19,7 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function AttachmentPreview({ attachment }: AttachmentPreviewProps) {
+export function AttachmentPreview({ attachment, onLoad }: AttachmentPreviewProps) {
   const isImage = attachment.mimeType.startsWith('image/');
   const isVideo = attachment.mimeType.startsWith('video/');
 
@@ -29,6 +30,7 @@ export function AttachmentPreview({ attachment }: AttachmentPreviewProps) {
         alt: attachment.filename,
         className: 'max-w-full rounded-lg max-h-64 object-contain',
         loading: 'lazy',
+        onLoad,
       }),
     );
   }
@@ -40,6 +42,7 @@ export function AttachmentPreview({ attachment }: AttachmentPreviewProps) {
         controls: true,
         className: 'max-w-full rounded-lg max-h-64',
         preload: 'metadata',
+        onLoadedMetadata: onLoad,
       }),
     );
   }
