@@ -18,7 +18,10 @@ export function ConnectionStatus({ status, error }: ConnectionStatusProps) {
     status === 'error' ? 'Connection error' :
     'Disconnected';
 
-  return h('div', { className: 'flex items-center gap-2 border-b border-border/50 px-4 py-2.5' },
+  return h('div', {
+    className: 'flex items-center gap-2 border-b border-border/50 px-4 py-2.5',
+    style: { flexShrink: 0 },
+  },
     h('div', { className: `h-2 w-2 rounded-full ${dotColor}` }),
     h('span', { className: 'text-xs text-muted-foreground' }, label),
     error

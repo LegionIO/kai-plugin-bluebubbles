@@ -108,9 +108,21 @@ export function ThreadView({
     ? messages.find((m) => m.guid === replyToGuid)
     : null;
 
-  return h('div', { className: 'flex h-full flex-col' },
+  return h('div', {
+    className: 'flex h-full flex-col',
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      height: '100%',
+      minHeight: 0,
+      overflow: 'hidden',
+    },
+  },
     // Header
-    h('div', { className: 'flex items-center gap-3 border-b border-border/50 px-4 py-3' },
+    h('div', {
+      className: 'flex items-center gap-3 border-b border-border/50 px-4 py-3',
+      style: { flexShrink: 0 },
+    },
       h('div', { className: 'min-w-0 flex-1' },
         h('h2', { className: 'text-sm font-semibold' }, chat.displayName),
         chat.isGroup && chat.participants?.length > 0
@@ -177,7 +189,10 @@ export function ThreadView({
 
     // Save contact inline form
     editingContact
-      ? h('div', { className: 'flex items-center gap-2 border-b border-border/30 px-4 py-2 bg-muted/30' },
+      ? h('div', {
+          className: 'flex items-center gap-2 border-b border-border/30 px-4 py-2 bg-muted/30',
+          style: { flexShrink: 0 },
+        },
           h('span', { className: 'text-xs text-muted-foreground' }, `Save ${editingContact}:`),
           h('input', {
             type: 'text',
@@ -218,6 +233,12 @@ export function ThreadView({
       ref: scrollRef,
       onScroll: handleScroll,
       className: 'flex-1 overflow-y-auto px-4 py-3',
+      style: {
+        flex: '1 1 0',
+        minHeight: 0,
+        overflowY: 'auto',
+        overscrollBehavior: 'contain',
+      },
     },
       loadingMessages && messages.length === 0
         ? h('div', { className: 'flex h-full items-center justify-center text-sm text-muted-foreground' }, 'Loading messages...')
@@ -380,6 +401,7 @@ function ThreadSettingsBar({ threadSettings, onSave }: { threadSettings: Record<
       borderBottom: '1px solid var(--color-border, rgba(128,128,128,0.2))',
       padding: '6px 12px',
       display: 'flex',
+      flexShrink: 0,
       flexWrap: 'wrap',
       gap: '6px',
       alignItems: 'center',

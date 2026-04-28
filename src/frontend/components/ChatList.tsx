@@ -48,7 +48,16 @@ export function ChatList({
   onSelectChat,
   onDeleteChat,
 }: ChatListProps) {
-  return h('div', { style: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, height: '100%' } },
+  return h('div', {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      flex: '1 1 0',
+      minHeight: 0,
+      height: '100%',
+      overflow: 'hidden',
+    },
+  },
     // Search bar
     h('div', { style: { flexShrink: 0, padding: '12px' } },
       h('div', { style: { position: 'relative', display: 'flex', alignItems: 'center' } },
@@ -80,7 +89,15 @@ export function ChatList({
     ),
 
     // Chat list
-    h('div', { className: 'flex-1 overflow-y-auto' },
+    h('div', {
+      className: 'flex-1 overflow-y-auto',
+      style: {
+        flex: '1 1 0',
+        minHeight: 0,
+        overflowY: 'auto',
+        overscrollBehavior: 'contain',
+      },
+    },
       loadingChats && chats.length === 0
         ? h('div', { className: 'p-4 text-center text-sm text-muted-foreground' }, 'Loading conversations...')
         : chats.length === 0

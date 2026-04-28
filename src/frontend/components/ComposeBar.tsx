@@ -87,7 +87,7 @@ export function ComposeBar({ onSend, sending, replyTo, onCancelReply, onTyping, 
     });
   }, []);
 
-  return h('div', { className: 'border-t border-border/50' },
+  return h('div', { className: 'border-t border-border/50', style: { flexShrink: 0 } },
     // Reply indicator
     replyTo
       ? h('div', { className: 'flex items-center gap-2 border-b border-border/30 px-4 py-2 text-xs text-muted-foreground' },

@@ -16,6 +16,102 @@ type PluginComponentProps = {
   setPluginConfig?: (path: string, value: unknown) => Promise<void>;
 };
 
+function digitsOnly(value: unknown): string {
+  return String(value ?? '').replace(/\D/g, '');
+}
+
+function normalizeAddress(address: string): string {
+  const cleaned = address.replace(/[\s\-()]/g, '');
+  if (/^\+?\d{10,}$/.test(cleaned)) {
+    const digits = digitsOnly(cleaned);
+    if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+    if (digits.length === 10) return `+1${digits}`;
+  }
+  return cleaned.toLowerCase();
+}
+
+function addSearchValue(textParts: string[], digitParts: string[], value: unknown): void {
+  const text = String(value ?? '').trim();
+  if (!text) return;
+
+  textParts.push(text.toLowerCase());
+
+  const digits = digitsOnly(text);
+  if (digits) digitParts.push(digits);
+}
+
+function findSavedContactNames(address: string, contacts: Record<string, string>): string[] {
+  const names = new Set<string>();
+  const normalized = normalizeAddress(address);
+  const addressDigits = digitsOnly(address);
+
+  for (const [savedAddress, name] of Object.entries(contacts)) {
+    const savedNormalized = normalizeAddress(savedAddress);
+    const savedDigits = digitsOnly(savedAddress);
+
+    if (
+      savedNormalized === normalized ||
+      (addressDigits && savedDigits && (addressDigits.endsWith(savedDigits) || savedDigits.endsWith(addressDigits)))
+    ) {
+      names.add(name);
+    }
+  }
+
+  return [...names];
+}
+
+function chatMatchesSearch(
+  chat: any,
+  query: string,
+  contacts: Record<string, string>,
+  activeChatGuid: string | null,
+  activeChatMessages: any[],
+  chatHistories: Record<string, any[]>,
+): boolean {
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return true;
+
+  const textParts: string[] = [];
+  const digitParts: string[] = [];
+
+  addSearchValue(textParts, digitParts, chat.guid);
+  addSearchValue(textParts, digitParts, chat.displayName);
+  addSearchValue(textParts, digitParts, chat.lastMessage);
+
+  for (const participant of chat.participants ?? []) {
+    addSearchValue(textParts, digitParts, participant.displayName);
+    addSearchValue(textParts, digitParts, participant.address);
+
+    for (const contactName of findSavedContactNames(participant.address ?? '', contacts)) {
+      addSearchValue(textParts, digitParts, contactName);
+    }
+  }
+
+  const historyMessages = Array.isArray(chatHistories[chat.guid]) ? chatHistories[chat.guid] : [];
+  for (const historyMessage of historyMessages) {
+    addSearchValue(textParts, digitParts, historyMessage.senderName);
+    addSearchValue(textParts, digitParts, historyMessage.content);
+  }
+
+  if (chat.guid === activeChatGuid && Array.isArray(activeChatMessages)) {
+    for (const message of activeChatMessages) {
+      addSearchValue(textParts, digitParts, message.senderName);
+      addSearchValue(textParts, digitParts, message.sender);
+      addSearchValue(textParts, digitParts, message.text);
+    }
+  }
+
+  const searchableText = textParts.join('\n');
+  const searchableDigits = digitParts.join(' ');
+
+  return terms.every((term) => {
+    if (searchableText.includes(term)) return true;
+
+    const termDigits = digitsOnly(term);
+    return Boolean(termDigits && searchableDigits.includes(termDigits));
+  });
+}
+
 export function PanelView({
   onAction,
   pluginState,
@@ -127,7 +223,16 @@ export function PanelView({
 
   const chats = (state.chats ?? []) as any[];
   const filteredChats = searchFilter
-    ? chats.filter((c: any) => c.displayName?.toLowerCase().includes(searchFilter.toLowerCase()))
+    ? chats.filter((c: any) =>
+        chatMatchesSearch(
+          c,
+          searchFilter,
+          state.contacts ?? {},
+          state.activeChatGuid ?? null,
+          state.activeChatMessages ?? [],
+          config.chatHistories ?? {},
+        ),
+      )
     : chats;
 
   const activeChat = chats.find((c: any) => c.guid === state.activeChatGuid);
@@ -139,7 +244,8 @@ export function PanelView({
       display: 'flex',
       margin: '-1.25rem -1.5rem',
       width: 'calc(100% + 3rem)',
-      height: 'calc(100% + 2.5rem)',
+      height: 'calc(100vh - 3rem)',
+      minHeight: 0,
       overflow: 'hidden',
     },
   },
@@ -150,6 +256,9 @@ export function PanelView({
         flexDirection: 'column',
         width: '320px',
         flexShrink: 0,
+        height: '100%',
+        minHeight: 0,
+        overflow: 'hidden',
         borderRight: '1px solid var(--color-border, rgba(128,128,128,0.2))',
       },
     },
@@ -166,7 +275,17 @@ export function PanelView({
     ),
 
     // Right content - Thread view or empty state
-    h('div', { style: { display: 'flex', flex: 1, flexDirection: 'column', minWidth: 0 } },
+    h('div', {
+      style: {
+        display: 'flex',
+        flex: '1 1 0',
+        flexDirection: 'column',
+        height: '100%',
+        minHeight: 0,
+        minWidth: 0,
+        overflow: 'hidden',
+      },
+    },
       state.activeChatGuid && activeChat
         ? h(ThreadView, {
             chat: activeChat,
