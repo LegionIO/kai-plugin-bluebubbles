@@ -1,20 +1,9 @@
-import { useState, useEffect, useCallback } from '../hooks';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ChatList } from './ChatList';
 import { ThreadView } from './ThreadView';
 import { EmptyState } from './EmptyState';
 import { ConnectionStatus } from './ConnectionStatus';
-
-type PluginComponentProps = {
-  pluginName: string;
-  props?: Record<string, unknown>;
-  onAction: (action: string, data?: unknown) => void;
-  onClose?: () => void;
-  config?: Record<string, unknown>;
-  updateConfig?: (path: string, value: unknown) => Promise<void>;
-  pluginConfig?: Record<string, unknown>;
-  pluginState?: Record<string, unknown>;
-  setPluginConfig?: (path: string, value: unknown) => Promise<void>;
-};
+import type { PluginComponentProps } from '../hooks';
 
 function digitsOnly(value: unknown): string {
   return String(value ?? '').replace(/\D/g, '');
@@ -237,81 +226,83 @@ export function PanelView({
 
   const activeChat = chats.find((c: any) => c.guid === state.activeChatGuid);
 
-  const h = (globalThis as any).React.createElement;
-
-  return h('div', {
-    style: {
-      display: 'flex',
-      margin: '-1.25rem -1.5rem',
-      width: 'calc(100% + 3rem)',
-      height: 'calc(100vh - 3rem)',
-      minHeight: 0,
-      overflow: 'hidden',
-    },
-  },
-    // Left sidebar - Chat list
-    h('div', {
-      style: {
+  return (
+    <div
+      style={{
         display: 'flex',
-        flexDirection: 'column',
-        width: '320px',
-        flexShrink: 0,
-        height: '100%',
+        margin: '-1.25rem -1.5rem',
+        width: 'calc(100% + 3rem)',
+        height: 'calc(100vh - 3rem)',
         minHeight: 0,
         overflow: 'hidden',
-        borderRight: '1px solid var(--color-border, rgba(128,128,128,0.2))',
-      },
-    },
-      h(ConnectionStatus, { status: state.connectionStatus, error: state.error }),
-      h(ChatList, {
-        chats: filteredChats,
-        activeChatGuid: state.activeChatGuid,
-        loadingChats: state.loadingChats,
-        searchFilter,
-        onSearchChange: setSearchFilter,
-        onSelectChat: handleSelectChat,
-        onDeleteChat: handleDeleteChat,
-      }),
-    ),
+      }}
+    >
+      {/* Left sidebar - Chat list */}
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          width: '320px',
+          flexShrink: 0,
+          height: '100%',
+          minHeight: 0,
+          overflow: 'hidden',
+          borderRight: '1px solid var(--color-border, rgba(128,128,128,0.2))',
+        }}
+      >
+        <ConnectionStatus status={state.connectionStatus} error={state.error} />
+        <ChatList
+          chats={filteredChats}
+          activeChatGuid={state.activeChatGuid}
+          loadingChats={state.loadingChats}
+          searchFilter={searchFilter}
+          onSearchChange={setSearchFilter}
+          onSelectChat={handleSelectChat}
+          onDeleteChat={handleDeleteChat}
+        />
+      </div>
 
-    // Right content - Thread view or empty state
-    h('div', {
-      style: {
-        display: 'flex',
-        flex: '1 1 0',
-        flexDirection: 'column',
-        height: '100%',
-        minHeight: 0,
-        minWidth: 0,
-        overflow: 'hidden',
-      },
-    },
-      state.activeChatGuid && activeChat
-        ? h(ThreadView, {
-            chat: activeChat,
-            messages: state.activeChatMessages ?? [],
-            sendingMessage: state.sendingMessage,
-            loadingMessages: state.loadingMessages,
-            typingIndicator: (state.typingIndicators?.[state.activeChatGuid] ?? false) || (state.aiReplyProcessing?.[state.activeChatGuid] ?? false),
-            privateApiEnabled: state.privateApiEnabled,
-            replyToGuid,
-            onSendMessage: handleSendMessage,
-            onSendReaction: handleSendReaction,
-            onEditMessage: handleEditMessage,
-            onUnsendMessage: handleUnsendMessage,
-            onSetReplyTo: setReplyToGuid,
-            onLoadMore: handleLoadMore,
-            onSaveContact: handleSaveContact,
-            contacts: state.contacts ?? {},
-            onTyping: handleTyping,
-            threadSettings: localThreadSettings ?? (state.activeChatGuid ? (config.threadSettings?.[state.activeChatGuid] ?? {}) : {}),
-            onSaveThreadSettings: handleSaveThreadSettings,
-            onAttach: handleAttach,
-          })
-        : h(EmptyState, {
-            connected: state.connectionStatus === 'connected',
-            loading: state.loadingChats,
-          }),
-    ),
+      {/* Right content - Thread view or empty state */}
+      <div
+        style={{
+          display: 'flex',
+          flex: '1 1 0',
+          flexDirection: 'column',
+          height: '100%',
+          minHeight: 0,
+          minWidth: 0,
+          overflow: 'hidden',
+        }}
+      >
+        {state.activeChatGuid && activeChat ? (
+          <ThreadView
+            chat={activeChat}
+            messages={state.activeChatMessages ?? []}
+            sendingMessage={state.sendingMessage}
+            loadingMessages={state.loadingMessages}
+            typingIndicator={(state.typingIndicators?.[state.activeChatGuid] ?? false) || (state.aiReplyProcessing?.[state.activeChatGuid] ?? false)}
+            privateApiEnabled={state.privateApiEnabled}
+            replyToGuid={replyToGuid}
+            onSendMessage={handleSendMessage}
+            onSendReaction={handleSendReaction}
+            onEditMessage={handleEditMessage}
+            onUnsendMessage={handleUnsendMessage}
+            onSetReplyTo={setReplyToGuid}
+            onLoadMore={handleLoadMore}
+            onSaveContact={handleSaveContact}
+            contacts={state.contacts ?? {}}
+            onTyping={handleTyping}
+            threadSettings={localThreadSettings ?? (state.activeChatGuid ? (config.threadSettings?.[state.activeChatGuid] ?? {}) : {})}
+            onSaveThreadSettings={handleSaveThreadSettings}
+            onAttach={handleAttach}
+          />
+        ) : (
+          <EmptyState
+            connected={state.connectionStatus === 'connected'}
+            loading={state.loadingChats}
+          />
+        )}
+      </div>
+    </div>
   );
 }

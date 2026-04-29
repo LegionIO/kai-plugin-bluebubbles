@@ -27,6 +27,35 @@ const builtins = new Set([
   'readline', 'repl', 'string_decoder', 'sys', 'timers', 'tls', 'tty', 'vm',
 ]);
 
+// Plugin to redirect `import React from 'react'` to globalThis.React
+const reactGlobalPlugin = {
+  name: 'react-global',
+  setup(build) {
+    build.onResolve({ filter: /^react(\/jsx-runtime|\/jsx-dev-runtime)?$/ }, (args) => ({
+      path: args.path,
+      namespace: 'react-global',
+    }));
+    build.onLoad({ filter: /.*/, namespace: 'react-global' }, (args) => {
+      if (args.path === 'react') {
+        return {
+          contents: 'module.exports = globalThis.React;',
+          loader: 'js',
+        };
+      }
+      // react/jsx-runtime and react/jsx-dev-runtime
+      return {
+        contents: `
+          const React = globalThis.React;
+          module.exports.jsx = React.createElement;
+          module.exports.jsxs = React.createElement;
+          module.exports.Fragment = React.Fragment;
+        `,
+        loader: 'js',
+      };
+    });
+  },
+};
+
 // Plugin to resolve modules from local node_modules, bypassing Yarn PnP
 const localNodeModulesPlugin = {
   name: 'local-node-modules',
@@ -78,7 +107,7 @@ const frontendOptions = {
   jsx: 'transform',
   jsxFactory: 'React.createElement',
   jsxFragment: 'React.Fragment',
-  plugins: [localNodeModulesPlugin],
+  plugins: [reactGlobalPlugin, localNodeModulesPlugin],
 };
 
 // Ensure output directory exists

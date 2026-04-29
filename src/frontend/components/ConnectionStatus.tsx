@@ -1,4 +1,4 @@
-const h = (...args: any[]) => (globalThis as any).React.createElement(...args);
+import React from 'react';
 
 type ConnectionStatusProps = {
   status: string;
@@ -18,17 +18,21 @@ export function ConnectionStatus({ status, error }: ConnectionStatusProps) {
     status === 'error' ? 'Connection error' :
     'Disconnected';
 
-  return h('div', {
-    className: 'flex items-center gap-2 border-b border-border/50 px-4 py-2.5',
-    style: { flexShrink: 0 },
-  },
-    h('div', { className: `h-2 w-2 rounded-full ${dotColor}` }),
-    h('span', { className: 'text-xs text-muted-foreground' }, label),
-    error
-      ? h('span', {
-          className: 'ml-auto text-[10px] text-red-400 truncate max-w-[150px]',
-          title: error,
-        }, error)
-      : null,
+  return (
+    <div
+      className="flex items-center gap-2 border-b border-border/50 px-4 py-2.5"
+      style={{ flexShrink: 0 }}
+    >
+      <div className={`h-2 w-2 rounded-full ${dotColor}`} />
+      <span className="text-xs text-muted-foreground">{label}</span>
+      {error ? (
+        <span
+          className="ml-auto text-[10px] text-red-400 truncate max-w-[150px]"
+          title={error}
+        >
+          {error}
+        </span>
+      ) : null}
+    </div>
   );
 }

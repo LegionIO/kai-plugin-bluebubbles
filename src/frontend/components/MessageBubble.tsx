@@ -1,7 +1,5 @@
-import { useRef, useState } from '../hooks';
+import React, { useRef, useState } from 'react';
 import { AttachmentPreview } from './AttachmentPreview';
-
-const h = (...args: any[]) => (globalThis as any).React.createElement(...args);
 
 type MessageBubbleProps = {
   message: any;
@@ -18,12 +16,12 @@ type MessageBubbleProps = {
 };
 
 const REACTION_EMOJI: Record<string, string> = {
-  love: '\u2764\uFE0F',
-  like: '\uD83D\uDC4D',
-  dislike: '\uD83D\uDC4E',
-  laugh: '\uD83D\uDE02',
-  emphasize: '\u2757',
-  question: '\u2753',
+  love: '❤️',
+  like: '👍',
+  dislike: '👎',
+  laugh: '😂',
+  emphasize: '❗',
+  question: '❓',
 };
 
 export function MessageBubble({
@@ -48,12 +46,12 @@ export function MessageBubble({
   const isMe = message.isFromMe;
 
   if (message.isUnsent) {
-    return h('div', {
-      className: `flex ${isMe ? 'justify-end' : 'justify-start'} ${grouped ? 'mt-0.5' : 'mt-3'}`,
-    },
-      h('div', {
-        className: 'rounded-2xl px-3 py-1.5 text-xs italic text-muted-foreground/50 border border-dashed border-border/30',
-      }, 'Message unsent'),
+    return (
+      <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} ${grouped ? 'mt-0.5' : 'mt-3'}`}>
+        <div className="rounded-2xl px-3 py-1.5 text-xs italic text-muted-foreground/50 border border-dashed border-border/30">
+          Message unsent
+        </div>
+      </div>
     );
   }
 
@@ -114,182 +112,190 @@ export function MessageBubble({
     if (r.isFromMe) reactionGroups[r.type].hasFromMe = true;
   }
 
-  const quickReactBar = hovered && !showMenu && !editing
-    ? h('div', {
-        style: {
-          position: 'absolute',
-          bottom: 'calc(100% + 4px)',
-          left: isMe ? '0' : 'auto',
-          right: isMe ? 'auto' : '0',
-          zIndex: 2,
-          display: 'flex',
-          gap: '1px',
-          whiteSpace: 'nowrap',
-          borderRadius: '12px',
-          padding: '2px 4px',
-          backgroundColor: 'var(--color-card, #fff)',
-          border: '1px solid var(--color-border, rgba(128,128,128,0.15))',
-          boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
-        },
-        onMouseEnter: showHoverControls,
-        onMouseLeave: hideHoverControls,
-      },
-        ['love', 'like', 'dislike', 'laugh', 'emphasize', 'question'].map((type) =>
-          h('button', {
-            key: type,
-            type: 'button',
-            onClick: (e: any) => { e.stopPropagation(); onReact(type); },
-            style: {
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              padding: '2px 3px',
-              fontSize: '13px',
-              lineHeight: 1,
-              borderRadius: '6px',
-              transition: 'background 0.15s',
-            },
-            onMouseOver: (e: any) => { e.currentTarget.style.background = 'var(--color-muted, #e5e7eb)'; },
-            onMouseOut: (e: any) => { e.currentTarget.style.background = 'none'; },
-            title: type.charAt(0).toUpperCase() + type.slice(1),
-          }, REACTION_EMOJI[type]),
-        ),
-      )
-    : null;
-
-  return h('div', {
-    style: {
-      display: 'flex',
-      justifyContent: isMe ? 'flex-end' : 'flex-start',
-      marginTop: grouped ? '2px' : '12px',
-      position: 'relative',
-      zIndex: hovered ? 10 : 'auto',
-    },
-  },
-    h('div', {
-      style: {
-        maxWidth: '70%',
+  const quickReactBar = hovered && !showMenu && !editing ? (
+    <div
+      style={{
+        position: 'absolute',
+        bottom: 'calc(100% + 4px)',
+        left: isMe ? '0' : 'auto',
+        right: isMe ? 'auto' : '0',
+        zIndex: 2,
         display: 'flex',
-        flexDirection: 'column',
-        alignItems: isMe ? 'flex-end' : 'flex-start',
+        gap: '1px',
+        whiteSpace: 'nowrap',
+        borderRadius: '12px',
+        padding: '2px 4px',
+        backgroundColor: 'var(--color-card, #fff)',
+        border: '1px solid var(--color-border, rgba(128,128,128,0.15))',
+        boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
+      }}
+      onMouseEnter={showHoverControls}
+      onMouseLeave={hideHoverControls}
+    >
+      {['love', 'like', 'dislike', 'laugh', 'emphasize', 'question'].map((type) => (
+        <button
+          key={type}
+          type="button"
+          onClick={(e: any) => { e.stopPropagation(); onReact(type); }}
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            padding: '2px 3px',
+            fontSize: '13px',
+            lineHeight: 1,
+            borderRadius: '6px',
+            transition: 'background 0.15s',
+          }}
+          onMouseOver={(e: any) => { e.currentTarget.style.background = 'var(--color-muted, #e5e7eb)'; }}
+          onMouseOut={(e: any) => { e.currentTarget.style.background = 'none'; }}
+          title={type.charAt(0).toUpperCase() + type.slice(1)}
+        >
+          {REACTION_EMOJI[type]}
+        </button>
+      ))}
+    </div>
+  ) : null;
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        justifyContent: isMe ? 'flex-end' : 'flex-start',
+        marginTop: grouped ? '2px' : '12px',
         position: 'relative',
-        minWidth: '40px',
-      },
-      onMouseEnter: showHoverControls,
-      onMouseLeave: hideHoverControls,
-    },
+        zIndex: hovered ? 10 : 'auto',
+      }}
+    >
+      <div
+        style={{
+          maxWidth: '70%',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: isMe ? 'flex-end' : 'flex-start',
+          position: 'relative',
+          minWidth: '40px',
+        }}
+        onMouseEnter={showHoverControls}
+        onMouseLeave={hideHoverControls}
+      >
+        {/* Sender name (group chats, received messages, not grouped) */}
+        {!isMe && isGroup && !grouped ? (
+          <span className="mb-0.5 ml-3 text-[11px] font-medium text-muted-foreground">{message.senderName}</span>
+        ) : null}
 
-      // Sender name (group chats, received messages, not grouped)
-      !isMe && isGroup && !grouped
-        ? h('span', { className: 'mb-0.5 ml-3 text-[11px] font-medium text-muted-foreground' }, message.senderName)
-        : null,
+        {/* Message bubble */}
+        <div style={{ position: 'relative', maxWidth: '100%' }}>
+          {quickReactBar}
+          <div
+            onContextMenu={handleContextMenu}
+            style={isMe ? sentBubbleStyle : receivedBubbleStyle}
+            className={`relative ${borderRadius} px-3 py-2 text-sm break-words cursor-default`}
+          >
+            {/* Editing mode */}
+            {editing ? (
+              <div className="flex flex-col gap-1">
+                <textarea
+                  value={editText}
+                  onChange={(e: any) => setEditText(e.target.value)}
+                  className="w-full resize-none rounded bg-white/20 p-1 text-sm outline-none"
+                  rows={2}
+                  autoFocus
+                />
+                <div className="flex gap-1 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setEditing(false)}
+                    className="rounded px-2 py-0.5 text-xs bg-white/20 hover:bg-white/30"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSubmitEdit}
+                    className="rounded px-2 py-0.5 text-xs bg-white/30 hover:bg-white/40 font-medium"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <span style={{ whiteSpace: 'pre-wrap' }}>
+                {message.text}
+                {message.isEdited ? (
+                  <span className="ml-1 text-[10px] opacity-60">(edited)</span>
+                ) : null}
+              </span>
+            )}
 
-      // Message bubble
-      h('div', { style: { position: 'relative', maxWidth: '100%' } },
-        quickReactBar,
-        h('div', {
-          onContextMenu: handleContextMenu,
-          style: isMe ? sentBubbleStyle : receivedBubbleStyle,
-          className: `relative ${borderRadius} px-3 py-2 text-sm break-words cursor-default`,
-        },
-          // Editing mode
-          editing
-            ? h('div', { className: 'flex flex-col gap-1' },
-                h('textarea', {
-                  value: editText,
-                  onChange: (e: any) => setEditText(e.target.value),
-                  className: 'w-full resize-none rounded bg-white/20 p-1 text-sm outline-none',
-                  rows: 2,
-                  autoFocus: true,
-                }),
-                h('div', { className: 'flex gap-1 justify-end' },
-                  h('button', {
-                    type: 'button',
-                    onClick: () => setEditing(false),
-                    className: 'rounded px-2 py-0.5 text-xs bg-white/20 hover:bg-white/30',
-                  }, 'Cancel'),
-                  h('button', {
-                    type: 'button',
-                    onClick: handleSubmitEdit,
-                    className: 'rounded px-2 py-0.5 text-xs bg-white/30 hover:bg-white/40 font-medium',
-                  }, 'Save'),
-                ),
-              )
-            : h('span', { style: { whiteSpace: 'pre-wrap' } },
-                message.text,
-                message.isEdited
-                  ? h('span', { className: 'ml-1 text-[10px] opacity-60' }, '(edited)')
-                  : null,
-              ),
+            {/* Attachments */}
+            {(message.attachments ?? []).length > 0 ? (
+              <div className="mt-1.5 space-y-1">
+                {message.attachments.map((att: any) => (
+                  <AttachmentPreview key={att.guid} attachment={att} onLoad={onMediaLoad} />
+                ))}
+              </div>
+            ) : null}
 
-          // Attachments
-          (message.attachments ?? []).length > 0
-            ? h('div', { className: 'mt-1.5 space-y-1' },
-                message.attachments.map((att: any) =>
-                  h(AttachmentPreview, { key: att.guid, attachment: att, onLoad: onMediaLoad }),
-                ),
-              )
-            : null,
+            {/* Tool calls (when enabled) */}
+            {showToolCalls && message.toolCalls?.length > 0 ? (
+              <div
+                style={{
+                  marginTop: '6px',
+                  borderTop: '1px solid rgba(255,255,255,0.2)',
+                  paddingTop: '4px',
+                  fontSize: '10px',
+                  opacity: 0.8,
+                }}
+              >
+                {message.toolCalls.map((tc: any, i: number) => (
+                  <div
+                    key={i}
+                    style={{
+                      padding: '3px 0',
+                      borderBottom: i < message.toolCalls.length - 1 ? '1px solid rgba(255,255,255,0.1)' : 'none',
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span>{'🔧'}</span>
+                      <span>{tc.toolName}</span>
+                      {tc.durationMs ? <span style={{ opacity: 0.6, fontWeight: 400 }}>{`${tc.durationMs}ms`}</span> : null}
+                      {tc.error ? <span style={{ color: '#f87171' }}>{'✘'}</span> : <span style={{ color: '#4ade80' }}>{'✔'}</span>}
+                    </div>
+                    <details style={{ marginTop: '2px' }}>
+                      <summary style={{ cursor: 'pointer', opacity: 0.7 }}>Details</summary>
+                      <pre
+                        style={{
+                          fontSize: '9px',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-all',
+                          maxHeight: '100px',
+                          overflow: 'auto',
+                          margin: '2px 0',
+                          padding: '4px',
+                          borderRadius: '4px',
+                          background: 'rgba(0,0,0,0.15)',
+                        }}
+                      >
+                        {`Args: ${JSON.stringify(tc.args, null, 1)}\nResult: ${typeof tc.result === 'string' ? tc.result.slice(0, 500) : JSON.stringify(tc.result, null, 1)?.slice(0, 500)}`}
+                      </pre>
+                      {tc.error ? <div style={{ color: '#f87171', marginTop: '2px' }}>{`Error: ${tc.error}`}</div> : null}
+                    </details>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
 
-        // Tool calls (when enabled)
-        showToolCalls && message.toolCalls?.length > 0
-          ? h('div', {
-              style: {
-                marginTop: '6px',
-                borderTop: '1px solid rgba(255,255,255,0.2)',
-                paddingTop: '4px',
-                fontSize: '10px',
-                opacity: 0.8,
-              },
-            },
-              message.toolCalls.map((tc: any, i: number) =>
-                h('div', {
-                  key: i,
-                  style: {
-                    padding: '3px 0',
-                    borderBottom: i < message.toolCalls.length - 1 ? '1px solid rgba(255,255,255,0.1)' : 'none',
-                  },
-                },
-                  h('div', { style: { fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' } },
-                    h('span', null, '\uD83D\uDD27'),
-                    h('span', null, tc.toolName),
-                    tc.durationMs ? h('span', { style: { opacity: 0.6, fontWeight: 400 } }, `${tc.durationMs}ms`) : null,
-                    tc.error ? h('span', { style: { color: '#f87171' } }, '\u2718') : h('span', { style: { color: '#4ade80' } }, '\u2714'),
-                  ),
-                  h('details', { style: { marginTop: '2px' } },
-                    h('summary', { style: { cursor: 'pointer', opacity: 0.7 } }, 'Details'),
-                    h('pre', {
-                      style: {
-                        fontSize: '9px',
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-all',
-                        maxHeight: '100px',
-                        overflow: 'auto',
-                        margin: '2px 0',
-                        padding: '4px',
-                        borderRadius: '4px',
-                        background: 'rgba(0,0,0,0.15)',
-                      },
-                    },
-                      `Args: ${JSON.stringify(tc.args, null, 1)}\nResult: ${typeof tc.result === 'string' ? tc.result.slice(0, 500) : JSON.stringify(tc.result, null, 1)?.slice(0, 500)}`,
-                    ),
-                    tc.error ? h('div', { style: { color: '#f87171', marginTop: '2px' } }, `Error: ${tc.error}`) : null,
-                  ),
-                ),
-              ),
-            )
-          : null,
-        ),
-      ),
-
-      // Reactions
-      Object.keys(reactionGroups).length > 0
-        ? h('div', { className: `flex gap-0.5 mt-0.5 ${isMe ? 'mr-2 justify-end' : 'ml-2'}` },
-            Object.entries(reactionGroups).map(([type, { count, hasFromMe, senders }]) =>
-              h('span', {
-                key: type,
-                title: senders.join(', '),
-                style: {
+        {/* Reactions */}
+        {Object.keys(reactionGroups).length > 0 ? (
+          <div className={`flex gap-0.5 mt-0.5 ${isMe ? 'mr-2 justify-end' : 'ml-2'}`}>
+            {Object.entries(reactionGroups).map(([type, { count, hasFromMe, senders }]) => (
+              <span
+                key={type}
+                title={senders.join(', ')}
+                style={{
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '2px',
@@ -299,62 +305,69 @@ export function MessageBubble({
                   cursor: 'default',
                   backgroundColor: hasFromMe ? '#3b82f6' : 'var(--color-muted, #e5e7eb)',
                   color: hasFromMe ? '#ffffff' : 'var(--color-foreground, #1f2937)',
-                },
-              },
-                h('span', null, REACTION_EMOJI[type] ?? type),
-                count > 1 ? h('span', { style: { opacity: 0.8 } }, String(count)) : null,
-              ),
-            ),
-          )
-        : null,
+                }}
+              >
+                <span>{REACTION_EMOJI[type] ?? type}</span>
+                {count > 1 ? <span style={{ opacity: 0.8 }}>{String(count)}</span> : null}
+              </span>
+            ))}
+          </div>
+        ) : null}
 
-      // Time + status (not grouped)
-      !grouped
-        ? h('div', { className: `flex items-center gap-1 mt-0.5 ${isMe ? 'mr-2 justify-end' : 'ml-2'} text-[10px] text-muted-foreground/50` },
-            h('span', null, time),
-            isMe && message.error
-              ? h('span', { className: 'text-red-400' }, 'Failed')
-              : isMe && message.isRead
-                ? h('span', null, 'Read')
-                : isMe && message.isDelivered
-                  ? h('span', null, 'Delivered')
-                  : null,
-          )
-        : null,
+        {/* Time + status (not grouped) */}
+        {!grouped ? (
+          <div className={`flex items-center gap-1 mt-0.5 ${isMe ? 'mr-2 justify-end' : 'ml-2'} text-[10px] text-muted-foreground/50`}>
+            <span>{time}</span>
+            {isMe && message.error ? (
+              <span className="text-red-400">Failed</span>
+            ) : isMe && message.isRead ? (
+              <span>Read</span>
+            ) : isMe && message.isDelivered ? (
+              <span>Delivered</span>
+            ) : null}
+          </div>
+        ) : null}
 
-      // Context menu
-      showMenu
-        ? h('div', {
-            className: 'mt-1 rounded-lg border border-border/50 bg-card shadow-lg p-1 text-xs',
-          },
-            privateApiEnabled
-              ? h('button', {
-                  type: 'button',
-                  onClick: () => { onReact(); setShowMenu(false); },
-                  className: 'w-full rounded px-3 py-1.5 text-left hover:bg-muted/50',
-                }, 'React')
-              : null,
-            h('button', {
-              type: 'button',
-              onClick: () => { onReply(); setShowMenu(false); },
-              className: 'w-full rounded px-3 py-1.5 text-left hover:bg-muted/50',
-            }, 'Reply'),
-            isMe && privateApiEnabled
-              ? h('button', {
-                  type: 'button',
-                  onClick: () => { setEditing(true); setShowMenu(false); },
-                  className: 'w-full rounded px-3 py-1.5 text-left hover:bg-muted/50',
-                }, 'Edit')
-              : null,
-            isMe && privateApiEnabled
-              ? h('button', {
-                  type: 'button',
-                  onClick: () => { onUnsend(); setShowMenu(false); },
-                  className: 'w-full rounded px-3 py-1.5 text-left text-red-400 hover:bg-muted/50',
-                }, 'Unsend')
-              : null,
-          )
-        : null,
-    ),
+        {/* Context menu */}
+        {showMenu ? (
+          <div className="mt-1 rounded-lg border border-border/50 bg-card shadow-lg p-1 text-xs">
+            {privateApiEnabled ? (
+              <button
+                type="button"
+                onClick={() => { onReact(); setShowMenu(false); }}
+                className="w-full rounded px-3 py-1.5 text-left hover:bg-muted/50"
+              >
+                React
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => { onReply(); setShowMenu(false); }}
+              className="w-full rounded px-3 py-1.5 text-left hover:bg-muted/50"
+            >
+              Reply
+            </button>
+            {isMe && privateApiEnabled ? (
+              <button
+                type="button"
+                onClick={() => { setEditing(true); setShowMenu(false); }}
+                className="w-full rounded px-3 py-1.5 text-left hover:bg-muted/50"
+              >
+                Edit
+              </button>
+            ) : null}
+            {isMe && privateApiEnabled ? (
+              <button
+                type="button"
+                onClick={() => { onUnsend(); setShowMenu(false); }}
+                className="w-full rounded px-3 py-1.5 text-left text-red-400 hover:bg-muted/50"
+              >
+                Unsend
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }
