@@ -510,20 +510,17 @@ export async function activate(api: PluginAPI): Promise<void> {
     id: PANEL_ID,
     title: 'BlueBubbles',
     visible: true,
-    width: 'full',
   });
 
   api.ui.registerNavigationItem({
     id: NAV_ID,
     visible: true,
-    priority: 10,
     target: { type: 'panel', panelId: PANEL_ID },
   });
 
   api.ui.registerSettingsView({
     id: SETTINGS_ID,
     label: 'BlueBubbles',
-    priority: 50,
   });
 
   // Register action handlers
@@ -546,6 +543,7 @@ export async function activate(api: PluginAPI): Promise<void> {
   // Watch for config changes
   unsubConfig = api.config.onChanged(() => {
     const config = getConfig(api);
+    api.state.set('configured', isConfigured(config));
     if (client) client.updateConfig(config);
     if (aiReply) {
       aiReply.updateConfig(getAIReplyConfig(config));
@@ -562,6 +560,7 @@ export async function activate(api: PluginAPI): Promise<void> {
   // Initial connection if configured
   const config = getConfig(api);
   stateManager.setNotificationsEnabled(config.notifications !== false);
+  api.state.set('configured', isConfigured(config));
   if (isConfigured(config)) {
     connect(api).catch((err) => api.log.error('Initial connection failed:', err));
   }

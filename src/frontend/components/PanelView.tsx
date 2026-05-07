@@ -227,29 +227,9 @@ export function PanelView({
   const activeChat = chats.find((c: any) => c.guid === state.activeChatGuid);
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        margin: '-1.25rem -1.5rem',
-        width: 'calc(100% + 3rem)',
-        height: 'calc(100vh - 3rem)',
-        minHeight: 0,
-        overflow: 'hidden',
-      }}
-    >
+    <div className="flex h-[calc(100vh-8rem)] min-h-[500px] overflow-hidden rounded-2xl">
       {/* Left sidebar - Chat list */}
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          width: '320px',
-          flexShrink: 0,
-          height: '100%',
-          minHeight: 0,
-          overflow: 'hidden',
-          borderRight: '1px solid var(--color-border, rgba(128,128,128,0.2))',
-        }}
-      >
+      <div className="flex flex-col w-[320px] shrink-0 h-full min-h-0 overflow-hidden border-r border-border/50">
         <ConnectionStatus status={state.connectionStatus} error={state.error} />
         <ChatList
           chats={filteredChats}
@@ -263,17 +243,7 @@ export function PanelView({
       </div>
 
       {/* Right content - Thread view or empty state */}
-      <div
-        style={{
-          display: 'flex',
-          flex: '1 1 0',
-          flexDirection: 'column',
-          height: '100%',
-          minHeight: 0,
-          minWidth: 0,
-          overflow: 'hidden',
-        }}
-      >
+      <div className="flex flex-1 flex-col h-full min-h-0 min-w-0 overflow-hidden">
         {state.activeChatGuid && activeChat ? (
           <ThreadView
             chat={activeChat}
