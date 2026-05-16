@@ -330,7 +330,7 @@ export function PanelView({
   const activeChat = chats.find((c: any) => c.guid === state.activeChatGuid);
 
   return (
-    <div className="flex overflow-hidden rounded-2xl" style={{ height: 'calc(100vh - 8rem)', minHeight: '500px' }}>
+    <div className="flex overflow-hidden" style={{ height: '680px', minHeight: '480px' }}>
       {/* Left sidebar - Always shows chat list */}
       <div className="flex flex-col shrink-0 h-full min-h-0 overflow-hidden border-r border-border/50" style={{ width: '320px' }}>
         <ConnectionStatus status={state.connectionStatus} error={state.error} />
