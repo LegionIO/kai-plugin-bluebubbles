@@ -25,11 +25,12 @@ export function AttachmentPreview({ attachment, onLoad }: AttachmentPreviewProps
 
   if (isImage) {
     return (
-      <div className="mt-1">
+      <div className="mt-1 overflow-hidden">
         <img
           src={attachment.downloadUrl}
           alt={attachment.filename}
-          className="max-w-full rounded-lg max-h-64 object-contain"
+          className="rounded-lg max-h-64 object-contain"
+          style={{ maxWidth: '100%' }}
           loading="lazy"
           onLoad={onLoad}
         />
@@ -39,11 +40,12 @@ export function AttachmentPreview({ attachment, onLoad }: AttachmentPreviewProps
 
   if (isVideo) {
     return (
-      <div className="mt-1">
+      <div className="mt-1 overflow-hidden">
         <video
           src={attachment.downloadUrl}
           controls
-          className="max-w-full rounded-lg max-h-64"
+          className="rounded-lg max-h-64"
+          style={{ maxWidth: '100%' }}
           preload="metadata"
           onLoadedMetadata={onLoad}
         />

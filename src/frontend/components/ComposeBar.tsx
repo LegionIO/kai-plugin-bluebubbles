@@ -180,7 +180,7 @@ export function ComposeBar({ onSend, sending, replyTo, onCancelReply, onTyping, 
       {/* Input area */}
       <div
         className="flex items-center gap-2"
-        style={{ padding: '10px 12px 22px' }}
+        style={{ padding: '10px 12px 12px' }}
       >
         {/* Attach button */}
         {allowAttach ? (
@@ -217,7 +217,7 @@ export function ComposeBar({ onSend, sending, replyTo, onCancelReply, onTyping, 
           onKeyDown={handleKeyDown}
           placeholder="iMessage"
           rows={1}
-          className="flex-1 resize-none rounded-2xl border border-border/50 bg-muted/30 px-4 py-2 text-sm placeholder:text-muted-foreground/40 focus:border-primary/50 focus:outline-none"
+          className="flex-1 min-w-0 resize-none rounded-2xl border border-border/50 bg-muted/30 px-4 py-2 text-sm placeholder:text-muted-foreground/40 focus:border-primary/50 focus:outline-none"
         />
         <button
           type="button"

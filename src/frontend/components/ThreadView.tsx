@@ -325,11 +325,12 @@ export function ThreadView({
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="h-full overflow-y-auto px-4 py-3"
+          className="h-full overflow-y-auto px-3 py-3"
           style={{
             height: '100%',
             minHeight: 0,
             overflowY: 'auto',
+            overflowX: 'hidden',
             overscrollBehavior: 'contain',
           }}
         >

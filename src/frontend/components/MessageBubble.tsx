@@ -169,7 +169,7 @@ export function MessageBubble({
     >
       <div
         style={{
-          maxWidth: '70%',
+          maxWidth: 'min(70%, 320px)',
           display: 'flex',
           flexDirection: 'column',
           alignItems: isMe ? 'flex-end' : 'flex-start',
@@ -185,12 +185,12 @@ export function MessageBubble({
         ) : null}
 
         {/* Message bubble */}
-        <div style={{ position: 'relative', maxWidth: '100%' }}>
+        <div style={{ position: 'relative', maxWidth: '100%', overflow: 'hidden' }}>
           {quickReactBar}
           <div
             onContextMenu={handleContextMenu}
-            style={isMe ? sentBubbleStyle : receivedBubbleStyle}
-            className={`relative ${borderRadius} px-3 py-2 text-sm break-words cursor-default`}
+            className={`relative ${borderRadius} px-3 py-2 text-sm break-words overflow-hidden cursor-default`}
+            style={{ ...(isMe ? sentBubbleStyle : receivedBubbleStyle), wordBreak: 'break-word', overflowWrap: 'anywhere' }}
           >
             {/* Editing mode */}
             {editing ? (
