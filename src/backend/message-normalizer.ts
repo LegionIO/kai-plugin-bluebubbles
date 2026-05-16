@@ -10,6 +10,24 @@ import type {
   ReactionType,
 } from '../shared/types.js';
 
+/** Generate a human-readable preview string for attachments */
+export function formatAttachmentPreview(attachments: Array<{ mimeType?: string | null }>): string {
+  if (attachments.length === 0) return '';
+
+  const photos = attachments.filter((a) => a.mimeType?.startsWith('image/')).length;
+  const videos = attachments.filter((a) => a.mimeType?.startsWith('video/')).length;
+  const audio = attachments.filter((a) => a.mimeType?.startsWith('audio/')).length;
+  const other = attachments.length - photos - videos - audio;
+
+  const parts: string[] = [];
+  if (photos > 0) parts.push(`${photos} Photo${photos > 1 ? 's' : ''}`);
+  if (videos > 0) parts.push(`${videos} Video${videos > 1 ? 's' : ''}`);
+  if (audio > 0) parts.push(`${audio} Audio`);
+  if (other > 0) parts.push(`${other} File${other > 1 ? 's' : ''}`);
+
+  return `Attachment: ${parts.join(', ')}`;
+}
+
 export function normalizeChat(chat: BBChat, contactResolve?: (address: string) => string): NormalizedChat {
   const guid = chat.guid ?? '';
   const service = guid.startsWith('SMS') ? 'SMS' as const : 'iMessage' as const;
@@ -26,7 +44,11 @@ export function normalizeChat(chat: BBChat, contactResolve?: (address: string) =
   }
 
   const lastMsg = chat.lastMessage;
-  const lastMessage = lastMsg?.text?.trim() || (lastMsg?.attachments?.length ? '[Attachment]' : '');
+  const attachments = lastMsg?.attachments ?? [];
+  let lastMessage = lastMsg?.text?.trim() || '';
+  if (!lastMessage && attachments.length > 0) {
+    lastMessage = formatAttachmentPreview(attachments);
+  }
   const lastMessageDate = lastMsg?.dateCreated ?? 0;
 
   return {

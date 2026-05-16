@@ -2,6 +2,19 @@ import React, { useState, useCallback } from 'react';
 import { Dropdown, AutoManualToggle, useModelCatalog, useProfileCatalog } from './ModelProfileSelectors';
 import type { PluginComponentProps } from '../hooks';
 
+function formatSyncTime(timestamp: number): string {
+  const diff = Date.now() - timestamp;
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days < 7) return `${days}d ago`;
+  return new Date(timestamp).toLocaleDateString();
+}
+
 function SettingsField({ label, description, children }: { label: string; description?: string; children: any }) {
   return (
     <div className="space-y-1.5">
@@ -323,6 +336,41 @@ export function SettingsView({
           Saved contact names are used by the AI to understand who is messaging and shown in the chat UI.
         </p>
 
+        {/* Sync status summary */}
+        {state.contactSyncInfo ? (
+          <div className="flex items-center justify-between rounded-lg bg-muted/30 border border-border/40 px-3 py-2 mb-3">
+            <div className="text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">{state.contactSyncInfo.syncedCount}</span> contacts synced from BlueBubbles
+              {state.contactSyncInfo.photoCount > 0 ? (
+                <span> ({state.contactSyncInfo.photoCount} with photos)</span>
+              ) : null}
+              {state.contactSyncInfo.lastSyncTime ? (
+                <span className="ml-1.5 text-muted-foreground/60">
+                  {' · '}last synced {formatSyncTime(state.contactSyncInfo.lastSyncTime)}
+                </span>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              onClick={() => onAction('syncContacts')}
+              className="rounded-md px-2.5 py-1 text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+            >
+              Re-sync
+            </button>
+          </div>
+        ) : state.connectionStatus === 'connected' ? (
+          <div className="flex items-center justify-between rounded-lg bg-muted/30 border border-border/40 px-3 py-2 mb-3">
+            <div className="text-xs text-muted-foreground">No contacts synced from BlueBubbles yet.</div>
+            <button
+              type="button"
+              onClick={() => onAction('syncContacts')}
+              className="rounded-md px-2.5 py-1 text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+            >
+              Sync Now
+            </button>
+          </div>
+        ) : null}
+
         {contactEntries.length > 0 ? (
           <div className="rounded-lg border border-border/50 overflow-hidden mb-3">
             <table className="w-full text-sm">
@@ -330,25 +378,40 @@ export function SettingsView({
                 <tr className="border-b border-border/50 bg-muted/20">
                   <th className="px-3 py-2 text-left font-medium text-muted-foreground">Address</th>
                   <th className="px-3 py-2 text-left font-medium text-muted-foreground">Name</th>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground w-16">Source</th>
                   <th className="px-3 py-2 w-16" />
                 </tr>
               </thead>
               <tbody>
-                {contactEntries.map(([address, name]) => (
-                  <tr key={address} className="border-b border-border/30 last:border-0">
-                    <td className="px-3 py-2 font-mono text-xs">{address}</td>
-                    <td className="px-3 py-2">{name}</td>
-                    <td className="px-3 py-2">
-                      <button
-                        type="button"
-                        onClick={() => onAction('deleteContact', { address })}
-                        className="text-xs text-red-400 hover:text-red-300"
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {contactEntries.map(([address, name]) => {
+                  const isSynced = state.contactSyncInfo?.syncedAddresses?.includes(address);
+                  return (
+                    <tr key={address} className="border-b border-border/30 last:border-0">
+                      <td className="px-3 py-2 font-mono text-xs">{address}</td>
+                      <td className="px-3 py-2">{name}</td>
+                      <td className="px-3 py-2">
+                        {isSynced ? (
+                          <span className="inline-flex items-center rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-400">
+                            BB
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-full bg-muted/50 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                            manual
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        <button
+                          type="button"
+                          onClick={() => onAction('deleteContact', { address })}
+                          className="text-xs text-red-400 hover:text-red-300"
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

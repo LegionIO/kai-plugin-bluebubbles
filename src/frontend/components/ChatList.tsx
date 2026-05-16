@@ -1,5 +1,6 @@
 import React from 'react';
 import { SearchIcon } from '../icons';
+import { ChatAvatar } from './ChatAvatar';
 
 type ChatListProps = {
   chats: any[];
@@ -9,6 +10,7 @@ type ChatListProps = {
   onSearchChange: (value: string) => void;
   onSelectChat: (chatGuid: string) => void;
   onDeleteChat?: (chatGuid: string) => void;
+  contactPhotos?: Record<string, string>;
 };
 
 function formatRelativeTime(timestamp: number): string {
@@ -29,15 +31,6 @@ function formatRelativeTime(timestamp: number): string {
   return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
-function getInitials(name: string): string {
-  return name
-    .split(/[\s,]+/)
-    .slice(0, 2)
-    .map((w) => w[0] ?? '')
-    .join('')
-    .toUpperCase() || '?';
-}
-
 export function ChatList({
   chats,
   activeChatGuid,
@@ -46,6 +39,7 @@ export function ChatList({
   onSearchChange,
   onSelectChat,
   onDeleteChat,
+  contactPhotos = {},
 }: ChatListProps) {
   return (
     <div
@@ -105,9 +99,6 @@ export function ChatList({
         ) : (
           chats.map((chat: any) => {
             const isActive = chat.guid === activeChatGuid;
-            const isIMMessage = chat.service === 'iMessage';
-            const initials = getInitials(chat.displayName);
-            const avatarColor = isIMMessage ? 'bg-blue-500' : 'bg-green-500';
 
             return (
               <div
@@ -118,11 +109,7 @@ export function ChatList({
                 onClick={() => onSelectChat(chat.guid)}
               >
                 {/* Avatar */}
-                <div
-                  className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white ${avatarColor}`}
-                >
-                  {initials}
-                </div>
+                <ChatAvatar chat={chat} contactPhotos={contactPhotos} />
 
                 {/* Content */}
                 <div className="flex-1 min-w-0">

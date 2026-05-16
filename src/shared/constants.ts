@@ -50,4 +50,6 @@ export const BB_API_PATHS = {
   chatRead: (chatGuid: string) => `/api/v1/chat/${encodeURIComponent(chatGuid)}/read`,
   typingIndicator: (chatGuid: string) => `/api/v1/chat/${encodeURIComponent(chatGuid)}/typing`,
   attachment: (guid: string) => `/api/v1/attachment/${encodeURIComponent(guid)}/download`,
+  contactQuery: '/api/v1/contact/query',
+  chatIcon: (chatGuid: string) => `/api/v1/chat/${encodeURIComponent(chatGuid)}/icon`,
 };

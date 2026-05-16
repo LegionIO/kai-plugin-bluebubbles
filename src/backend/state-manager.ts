@@ -5,8 +5,10 @@ import type {
   NormalizedReaction,
   BBServerInfo,
   ConnectionStatus,
+  ContactSyncInfo,
 } from '../shared/types.js';
 import { NAV_ID } from '../shared/constants.js';
+import { formatAttachmentPreview } from './message-normalizer.js';
 
 type PluginStateAPI = {
   get: () => Record<string, unknown>;
@@ -78,6 +80,8 @@ export class StateManager {
       error: null,
       unreadTotal: 0,
       contacts: {},
+      contactPhotos: {},
+      contactSyncInfo: null,
       aiReplyProcessing: {},
       pendingChatGuid: null,
     };
@@ -219,6 +223,16 @@ export class StateManager {
     this.stateApi.set('contacts', contacts);
   }
 
+  setContactPhotos(photos: Record<string, string>): void {
+    this.state.contactPhotos = photos;
+    this.stateApi.set('contactPhotos', photos);
+  }
+
+  setContactSyncInfo(info: ContactSyncInfo): void {
+    this.state.contactSyncInfo = info;
+    this.stateApi.set('contactSyncInfo', info);
+  }
+
   setAIReplyProcessing(chatGuid: string, processing: boolean): void {
     this.state.aiReplyProcessing = {
       ...this.state.aiReplyProcessing,
@@ -236,7 +250,9 @@ export class StateManager {
     const chatIdx = this.state.chats.findIndex((c) => c.guid === message.chatGuid);
     if (chatIdx >= 0) {
       const chat = { ...this.state.chats[chatIdx] };
-      chat.lastMessage = message.text || '[Attachment]';
+      chat.lastMessage = message.text || (message.attachments.length > 0
+        ? formatAttachmentPreview(message.attachments)
+        : '');
       chat.lastMessageDate = message.date;
       if (!message.isFromMe && message.chatGuid !== this.state.activeChatGuid) {
         chat.unreadCount += 1;

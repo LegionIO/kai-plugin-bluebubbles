@@ -3,6 +3,8 @@ import { MessageBubble } from './MessageBubble';
 import { ComposeBar } from './ComposeBar';
 import { ReactionPicker } from './ReactionPicker';
 import { Dropdown, AutoManualToggle, useModelCatalog, useProfileCatalog } from './ModelProfileSelectors';
+import { SettingsIcon, UserIcon, BrainIcon, WrenchIcon } from '../icons';
+import { useDarkMode } from '../hooks';
 
 type ThreadViewProps = {
   chat: any;
@@ -251,11 +253,13 @@ export function ThreadView({
               cursor: 'pointer',
               padding: '4px',
               opacity: showThreadSettings ? 1 : 0.5,
-              fontSize: '16px',
+              color: 'var(--color-foreground, inherit)',
+              display: 'flex',
+              alignItems: 'center',
             }}
             title="Thread AI settings"
           >
-            {'⚙'}
+            <SettingsIcon size={16} />
           </button>
         ) : null}
       </div>
@@ -469,6 +473,7 @@ export function ThreadView({
 function ThreadSettingsBar({ threadSettings, onSave }: { threadSettings: Record<string, unknown>; onSave: (s: Record<string, unknown>) => void }) {
   const { models, defaultKey: defaultModelKey } = useModelCatalog();
   const { profiles, defaultKey: defaultProfileKey } = useProfileCatalog();
+  const isDark = useDarkMode();
 
   const ts = threadSettings as any;
   const isAuto = ts.fallbackEnabled ?? false;
@@ -512,6 +517,11 @@ function ThreadSettingsBar({ threadSettings, onSave }: { threadSettings: Record<
     }
   };
 
+  // Theme-aware colors for tool trace button
+  const toolBtnBg = ts.showToolCalls ? 'rgba(59,130,246,0.1)' : (isDark ? 'transparent' : 'var(--color-card, rgba(255,255,255,0.7))');
+  const toolBtnColor = ts.showToolCalls ? 'var(--color-primary, #3b82f6)' : (isDark ? 'var(--color-foreground, #e8e0d4)' : 'var(--color-foreground, #1f2937)');
+  const toolBtnBorder = ts.showToolCalls ? 'var(--color-primary, #3b82f6)' : (isDark ? 'transparent' : 'var(--color-border, rgba(128,128,128,0.25))');
+
   return (
     <div
       style={{
@@ -526,7 +536,7 @@ function ThreadSettingsBar({ threadSettings, onSave }: { threadSettings: Record<
     >
       <Dropdown
         label="Select profile"
-        icon={'👤'}
+        icon={<UserIcon size={14} />}
         value={ts.profileOverride ?? ''}
         options={profileOptions}
         onChange={handleProfileChange}
@@ -538,7 +548,7 @@ function ThreadSettingsBar({ threadSettings, onSave }: { threadSettings: Record<
       />
       <Dropdown
         label="Select model"
-        icon={'⚙'}
+        icon={<SettingsIcon size={14} />}
         value={ts.modelOverride ?? ''}
         options={modelOptions}
         onChange={(v: string) => onSave({ ...threadSettings, modelOverride: v || undefined })}
@@ -547,7 +557,7 @@ function ThreadSettingsBar({ threadSettings, onSave }: { threadSettings: Record<
       />
       <Dropdown
         label="Select thinking"
-        icon={'🧠'}
+        icon={<BrainIcon size={14} />}
         value={ts.reasoningEffort ?? ''}
         options={thinkingOptions}
         onChange={(v: string) => onSave({ ...threadSettings, reasoningEffort: v || undefined })}
@@ -562,9 +572,9 @@ function ThreadSettingsBar({ threadSettings, onSave }: { threadSettings: Record<
           alignItems: 'center',
           gap: '4px',
           borderRadius: '12px',
-          border: `1px solid ${ts.showToolCalls ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, rgba(128,128,128,0.25))'}`,
-          background: ts.showToolCalls ? 'rgba(59,130,246,0.1)' : 'var(--color-card, rgba(255,255,255,0.7))',
-          color: ts.showToolCalls ? 'var(--color-primary, #3b82f6)' : 'inherit',
+          border: `1px solid ${toolBtnBorder}`,
+          background: toolBtnBg,
+          color: toolBtnColor,
           padding: '4px 10px',
           fontSize: '11px',
           fontWeight: 500,
@@ -572,7 +582,7 @@ function ThreadSettingsBar({ threadSettings, onSave }: { threadSettings: Record<
           transition: 'all 0.15s',
         }}
       >
-        <span style={{ fontSize: '12px' }}>{'🔧'}</span>
+        <WrenchIcon size={12} />
         <span>{ts.showToolCalls ? 'Hide Tool Trace' : 'Show Tool Trace'}</span>
       </button>
     </div>

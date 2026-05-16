@@ -12,6 +12,15 @@ export type BBParticipant = {
   displayName?: string;
 };
 
+export type BBContact = {
+  phoneNumbers?: Array<{ address: string }>;
+  emails?: Array<{ address: string }>;
+  firstName?: string;
+  lastName?: string;
+  displayName?: string;
+  avatar?: string; // base64 encoded image data
+};
+
 export type BBAttachment = {
   originalROWID?: number;
   guid?: string;
@@ -160,8 +169,17 @@ export type BlueBubblesPluginState = {
   error: string | null;
   unreadTotal: number;
   contacts: Record<string, string>;
+  contactPhotos: Record<string, string>; // normalized address -> data URI
+  contactSyncInfo: ContactSyncInfo | null;
   aiReplyProcessing: Record<string, boolean>;
   pendingChatGuid: string | null;
+};
+
+export type ContactSyncInfo = {
+  syncedAddresses: string[]; // addresses that were auto-synced from BlueBubbles
+  lastSyncTime: number | null; // timestamp of last successful sync
+  syncedCount: number; // total contacts synced
+  photoCount: number; // contacts with photos
 };
 
 /* ── Plugin config shape ── */

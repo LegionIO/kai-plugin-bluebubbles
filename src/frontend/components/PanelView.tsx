@@ -239,6 +239,7 @@ export function PanelView({
           onSearchChange={setSearchFilter}
           onSelectChat={handleSelectChat}
           onDeleteChat={handleDeleteChat}
+          contactPhotos={state.contactPhotos ?? {}}
         />
       </div>
 

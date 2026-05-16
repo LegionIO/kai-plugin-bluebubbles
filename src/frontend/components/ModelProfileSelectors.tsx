@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { ArrowLeftRightIcon, ChevronDownIcon } from '../icons';
+import { useDarkMode } from '../hooks';
 
 const appApi = () => (globalThis as any).window?.app;
 
@@ -35,7 +37,7 @@ export function useProfileCatalog() {
 
 type DropdownProps = {
   label: string;
-  icon: string;
+  icon: React.ReactNode;
   value: string;
   options: Array<{ value: string; label: string; detail?: string }>;
   onChange: (value: string) => void;
@@ -46,6 +48,7 @@ type DropdownProps = {
 export function Dropdown({ label, icon, value, options, onChange, disabled, direction = 'down' }: DropdownProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const isDark = useDarkMode();
 
   useEffect(() => {
     if (!open) return;
@@ -58,6 +61,19 @@ export function Dropdown({ label, icon, value, options, onChange, disabled, dire
 
   const current = options.find((o) => o.value === value) ?? options[0];
 
+  // Theme-aware colors
+  // In dark mode, native Kai buttons are transparent/borderless with foreground-colored text
+  // Note: oklch() with nested var() may fail for some CSS variables (e.g. --color-popover)
+  // so we provide appropriate dark fallbacks alongside the CSS variable references.
+  const btnBg = isDark ? 'transparent' : 'var(--color-card, rgba(255,255,255,0.7))';
+  const btnColor = isDark ? 'var(--color-foreground, #e8e0d4)' : 'var(--color-foreground, #1f2937)';
+  const btnBorder = isDark ? 'transparent' : 'var(--color-border, rgba(128,128,128,0.25))';
+  const popoverBg = isDark ? 'var(--color-popover, #2a2720)' : 'var(--color-popover, rgba(255,255,255,0.95))';
+  const popoverColor = isDark ? 'var(--color-foreground, #e8e0d4)' : 'var(--color-foreground, #1f2937)';
+  const popoverBorder = isDark ? 'var(--color-border, rgba(255,255,255,0.08))' : 'var(--color-border, rgba(128,128,128,0.25))';
+  const hoverBg = isDark ? 'var(--color-muted, rgba(255,255,255,0.08))' : 'rgba(128,128,128,0.1)';
+  const mutedColor = isDark ? 'var(--color-muted-foreground, #a89e8c)' : 'var(--color-muted-foreground, #888)';
+
   return (
     <div ref={rootRef} style={{ position: 'relative', display: 'inline-flex' }}>
       <button
@@ -69,19 +85,19 @@ export function Dropdown({ label, icon, value, options, onChange, disabled, dire
           alignItems: 'center',
           gap: '4px',
           borderRadius: '12px',
-          border: '1px solid var(--color-border, rgba(128,128,128,0.25))',
-          background: 'var(--color-card, rgba(255,255,255,0.7))',
+          border: `1px solid ${btnBorder}`,
+          background: btnBg,
           padding: '4px 10px',
           fontSize: '11px',
           cursor: disabled ? 'not-allowed' : 'pointer',
           opacity: disabled ? 0.5 : 1,
-          color: 'inherit',
+          color: btnColor,
           transition: 'background 0.15s',
         }}
       >
-        <span style={{ fontSize: '12px' }}>{icon}</span>
+        <span style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>{icon}</span>
         <span style={{ fontWeight: 500, maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{current?.label ?? label}</span>
-        <span style={{ fontSize: '10px', opacity: 0.5 }}>{'▾'}</span>
+        <ChevronDownIcon size={10} />
       </button>
 
       {open ? (
@@ -94,14 +110,15 @@ export function Dropdown({ label, icon, value, options, onChange, disabled, dire
             zIndex: 50,
             width: '240px',
             borderRadius: '16px',
-            border: '1px solid var(--color-border, rgba(128,128,128,0.25))',
-            background: 'var(--color-popover, rgba(255,255,255,0.95))',
+            border: `1px solid ${popoverBorder}`,
+            background: popoverBg,
+            color: popoverColor,
             padding: '6px',
             boxShadow: '0 16px 40px rgba(5,4,15,0.28)',
             backdropFilter: 'blur(16px)',
           }}
         >
-          <div style={{ padding: '6px 12px', fontSize: '13px', fontWeight: 500, color: 'var(--color-muted-foreground, #888)' }}>{label}</div>
+          <div style={{ padding: '6px 12px', fontSize: '13px', fontWeight: 500, color: mutedColor }}>{label}</div>
           <div style={{ maxHeight: '280px', overflowY: 'auto' }}>
             {options.map((opt) => (
               <button
@@ -118,12 +135,12 @@ export function Dropdown({ label, icon, value, options, onChange, disabled, dire
                   fontSize: '13px',
                   border: 'none',
                   background: opt.value === value ? 'var(--color-primary, #3b82f6)' : 'none',
-                  color: opt.value === value ? '#fff' : 'inherit',
+                  color: opt.value === value ? 'var(--color-primary-foreground, #fff)' : popoverColor,
                   cursor: 'pointer',
                   textAlign: 'left',
                   transition: 'background 0.1s',
                 }}
-                onMouseOver={(e: any) => { if (opt.value !== value) e.currentTarget.style.background = 'var(--color-muted, #f3f4f6)'; }}
+                onMouseOver={(e: any) => { if (opt.value !== value) e.currentTarget.style.background = hoverBg; }}
                 onMouseOut={(e: any) => { if (opt.value !== value) e.currentTarget.style.background = 'none'; }}
               >
                 <span style={{ flex: 1, fontWeight: 500 }}>{opt.label}</span>
@@ -144,6 +161,11 @@ type AutoManualToggleProps = {
 };
 
 export function AutoManualToggle({ enabled, onToggle }: AutoManualToggleProps) {
+  const isDark = useDarkMode();
+  const btnBg = enabled ? 'rgba(59,130,246,0.1)' : (isDark ? 'transparent' : 'var(--color-card, rgba(255,255,255,0.7))');
+  const btnColor = enabled ? 'var(--color-primary, #3b82f6)' : (isDark ? 'var(--color-foreground, #e8e0d4)' : 'var(--color-foreground, #1f2937)');
+  const btnBorder = enabled ? 'var(--color-primary, #3b82f6)' : (isDark ? 'transparent' : 'var(--color-border, rgba(128,128,128,0.25))');
+
   return (
     <button
       type="button"
@@ -154,9 +176,9 @@ export function AutoManualToggle({ enabled, onToggle }: AutoManualToggleProps) {
         alignItems: 'center',
         gap: '4px',
         borderRadius: '12px',
-        border: `1px solid ${enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, rgba(128,128,128,0.25))'}`,
-        background: enabled ? 'rgba(59,130,246,0.1)' : 'var(--color-card, rgba(255,255,255,0.7))',
-        color: enabled ? 'var(--color-primary, #3b82f6)' : 'inherit',
+        border: `1px solid ${btnBorder}`,
+        background: btnBg,
+        color: btnColor,
         padding: '4px 10px',
         fontSize: '11px',
         fontWeight: 500,
@@ -164,7 +186,7 @@ export function AutoManualToggle({ enabled, onToggle }: AutoManualToggleProps) {
         transition: 'all 0.15s',
       }}
     >
-      <span style={{ fontSize: '12px' }}>{'⇄'}</span>
+      <ArrowLeftRightIcon size={12} />
       <span>{enabled ? 'Auto' : 'Manual'}</span>
     </button>
   );

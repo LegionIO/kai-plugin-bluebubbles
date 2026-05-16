@@ -1,6 +1,7 @@
 import { BB_API_PATHS } from '../shared/constants.js';
 import type {
   BBChat,
+  BBContact,
   BBMessage,
   BBServerInfo,
   BlueBubblesPluginConfig,
@@ -230,6 +231,30 @@ export class BlueBubblesClient {
       const contentType = res.headers.get('content-type') ?? 'application/octet-stream';
       const buffer = Buffer.from(await res.arrayBuffer());
       return { base64: buffer.toString('base64'), mimeType: contentType };
+    } catch {
+      return null;
+    }
+  }
+
+  async queryContacts(addresses: string[]): Promise<BBContact[]> {
+    return this.post<BBContact[]>(BB_API_PATHS.contactQuery, {
+      addresses,
+      extraProperties: ['avatar'],
+    });
+  }
+
+  getChatIconUrl(chatGuid: string): string {
+    return this.url(BB_API_PATHS.chatIcon(chatGuid));
+  }
+
+  async fetchChatIconAsBase64(chatGuid: string): Promise<string | null> {
+    try {
+      const url = this.getChatIconUrl(chatGuid);
+      const res = await this.fetchFn(url);
+      if (!res.ok) return null;
+      const contentType = res.headers.get('content-type') ?? 'image/jpeg';
+      const buffer = Buffer.from(await res.arrayBuffer());
+      return `data:${contentType};base64,${buffer.toString('base64')}`;
     } catch {
       return null;
     }

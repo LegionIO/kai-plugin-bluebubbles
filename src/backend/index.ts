@@ -2,6 +2,7 @@ import { BlueBubblesClient } from './bb-client.js';
 import { StateManager } from './state-manager.js';
 import { AIReplyEngine } from './ai-reply.js';
 import { ContactBook } from './contacts.js';
+import { ContactPhotoCache } from './contact-photos.js';
 import { ChatHistoryManager } from './chat-history.js';
 import { createWebhookHandler } from './webhook-handler.js';
 import { normalizeChat, normalizeMessage } from './message-normalizer.js';
@@ -91,6 +92,7 @@ let client: BlueBubblesClient | null = null;
 let stateManager: StateManager | null = null;
 let aiReply: AIReplyEngine | null = null;
 let contacts: ContactBook | null = null;
+let contactPhotoCache: ContactPhotoCache | null = null;
 let chatHistory: ChatHistoryManager | null = null;
 let webhookStarted = false;
 let unsubConfig: (() => void) | null = null;
@@ -151,6 +153,11 @@ async function connect(api: PluginAPI): Promise<void> {
 
     await loadChats(api);
     await startWebhook(api, config);
+
+    // Sync contact names and photos from BlueBubbles (non-blocking)
+    syncContactsFromBlueBubbles(api).catch((err) =>
+      api.log.warn('Failed to sync contacts from BlueBubbles:', err),
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     stateManager!.setConnectionStatus('error', msg);
@@ -170,6 +177,81 @@ async function loadChats(api: PluginAPI): Promise<void> {
   } finally {
     stateManager!.setLoadingChats(false);
   }
+}
+
+async function syncContactsFromBlueBubbles(api: PluginAPI): Promise<void> {
+  if (!client || !stateManager || !contacts || !contactPhotoCache) return;
+
+  // Always push cached photos immediately (fast path)
+  const cachedPhotos = contactPhotoCache.getPhotos();
+  if (Object.keys(cachedPhotos).length > 0) {
+    stateManager.setContactPhotos(cachedPhotos);
+  }
+
+  // Push cached sync info immediately
+  const cachedNames = contactPhotoCache.getNames();
+  if (Object.keys(cachedNames).length > 0) {
+    stateManager.setContactSyncInfo({
+      syncedAddresses: Object.keys(cachedNames),
+      lastSyncTime: contactPhotoCache.getLastFetched(),
+      syncedCount: Object.keys(cachedNames).length,
+      photoCount: Object.keys(cachedPhotos).length,
+    });
+  }
+
+  // Only refresh from BlueBubbles if cache is stale (>24h)
+  if (!contactPhotoCache.isCacheStale()) {
+    // Still sync any cached names that aren't in contacts yet
+    let namesUpdated = false;
+    for (const [address, name] of Object.entries(cachedNames)) {
+      if (!contacts.get(address)) {
+        contacts.set(address, name);
+        namesUpdated = true;
+      }
+    }
+    if (namesUpdated) {
+      stateManager.setContacts(contacts.getAll());
+      await loadChats(api);
+    }
+    return;
+  }
+
+  // Cache is stale — fetch fresh from BlueBubbles
+  const chats = stateManager.getState().chats;
+  const addresses = new Set<string>();
+  for (const chat of chats) {
+    for (const p of chat.participants) {
+      addresses.add(p.address);
+    }
+  }
+
+  if (addresses.size === 0) return;
+
+  const result = await contactPhotoCache.refreshFromBlueBubbles(client, [...addresses]);
+
+  // Auto-sync contact names from macOS Contacts (only add, don't overwrite user-set names)
+  let namesUpdated = false;
+  for (const [address, name] of Object.entries(result.names)) {
+    if (!contacts.get(address)) {
+      contacts.set(address, name);
+      namesUpdated = true;
+    }
+  }
+
+  if (namesUpdated) {
+    stateManager.setContacts(contacts.getAll());
+    // Reload chats so display names are updated with synced contact names
+    await loadChats(api);
+  }
+
+  // Push fresh photos and sync info to frontend
+  stateManager.setContactPhotos(result.photos);
+  stateManager.setContactSyncInfo({
+    syncedAddresses: Object.keys(result.names),
+    lastSyncTime: Date.now(),
+    syncedCount: Object.keys(result.names).length,
+    photoCount: Object.keys(result.photos).length,
+  });
 }
 
 async function startWebhook(api: PluginAPI, config: BlueBubblesPluginConfig): Promise<void> {
@@ -484,6 +566,41 @@ async function handleSettingsAction(api: PluginAPI, action: string, data?: unkno
       break;
     }
 
+    case 'syncContacts': {
+      // Force re-sync by clearing cache staleness check
+      if (contactPhotoCache && client && stateManager && contacts) {
+        const chats = stateManager.getState().chats;
+        const addresses = new Set<string>();
+        for (const chat of chats) {
+          for (const p of chat.participants) {
+            addresses.add(p.address);
+          }
+        }
+        if (addresses.size > 0) {
+          const result = await contactPhotoCache.refreshFromBlueBubbles(client, [...addresses]);
+          let namesUpdated = false;
+          for (const [address, name] of Object.entries(result.names)) {
+            if (!contacts.get(address)) {
+              contacts.set(address, name);
+              namesUpdated = true;
+            }
+          }
+          if (namesUpdated) {
+            stateManager.setContacts(contacts.getAll());
+            await loadChats(api);
+          }
+          stateManager.setContactPhotos(result.photos);
+          stateManager.setContactSyncInfo({
+            syncedAddresses: Object.keys(result.names),
+            lastSyncTime: Date.now(),
+            syncedCount: Object.keys(result.names).length,
+            photoCount: Object.keys(result.photos).length,
+          });
+        }
+      }
+      break;
+    }
+
     default:
       api.log.warn(`Unknown settings action: ${action}`);
   }
@@ -493,6 +610,7 @@ export async function activate(api: PluginAPI): Promise<void> {
   api.log.info('BlueBubbles plugin activating');
 
   contacts = new ContactBook(api.config);
+  contactPhotoCache = new ContactPhotoCache(api.config);
   chatHistory = new ChatHistoryManager(api.config);
   toolCallStore = (api.config.getPluginData().toolCallStore as Record<string, any[]>) ?? {};
 
@@ -525,7 +643,7 @@ export async function activate(api: PluginAPI): Promise<void> {
 
   // Register action handlers
   api.onAction(`panel:${PANEL_ID}`, (action, data) => handlePanelAction(api, action, data));
-  api.onAction(`settings:${SETTINGS_ID}`, (action, data) => handleSettingsAction(api, action, data));
+  api.onAction('settings:SettingsView', (action, data) => handleSettingsAction(api, action, data));
 
   // Register AI tools
   const tools = buildBlueBubblesTools({
@@ -577,6 +695,7 @@ export async function deactivate(): Promise<void> {
   stateManager = null;
   aiReply = null;
   contacts = null;
+  contactPhotoCache = null;
   chatHistory = null;
   webhookStarted = false;
 }
