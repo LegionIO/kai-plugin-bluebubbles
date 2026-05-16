@@ -43,7 +43,11 @@ export class BlueBubblesClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error(`BB API ${path}: ${res.status} ${res.statusText}`);
+    if (!res.ok) {
+      let detail = '';
+      try { const j = await res.json(); detail = j?.message || j?.error || JSON.stringify(j); } catch { /* ignore */ }
+      throw new Error(`BB API ${path}: ${res.status} ${res.statusText}${detail ? ` — ${detail}` : ''}`);
+    }
     const json = await res.json() as { status: number; data: T };
     return json.data;
   }
@@ -161,10 +165,12 @@ export class BlueBubblesClient {
     });
   }
 
-  async createChat(addresses: string[], message?: string): Promise<BBChat> {
+  async createChat(addresses: string[], message?: string, service?: string): Promise<BBChat> {
     return this.post<BBChat>(BB_API_PATHS.newChat, {
       addresses,
       ...(message ? { message } : {}),
+      ...(service ? { service } : {}),
+      method: 'private-api',
       tempGuid: `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     });
   }

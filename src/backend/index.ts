@@ -560,7 +560,15 @@ async function handlePanelAction(api: PluginAPI, action: string, data?: unknown)
         // Auto-navigate to the new conversation
         stateManager.setPendingChatGuid(newChat.guid);
       } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
         api.log.error('Failed to create chat:', err);
+        api.notifications.show({
+          id: 'create-chat-error',
+          title: 'Failed to create conversation',
+          body: msg,
+          level: 'error',
+          autoDismissMs: 8000,
+        });
       }
       break;
     }
