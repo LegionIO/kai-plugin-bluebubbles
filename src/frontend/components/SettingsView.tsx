@@ -344,7 +344,18 @@ export function SettingsView({
       <SettingsSection title="Contacts">
         <p className="text-xs text-muted-foreground mb-2">
           Saved contact names are used by the AI to understand who is messaging and shown in the chat UI.
+          Contact photos from macOS Contacts and iMessage require Full Disk Access.
         </p>
+
+        <div className="mb-3">
+          <button
+            type="button"
+            onClick={() => onAction('openFdaSettings')}
+            className="rounded-md px-2.5 py-1 text-xs font-medium bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 transition-colors"
+          >
+            Open Full Disk Access Settings
+          </button>
+        </div>
 
         {/* Sync status summary */}
         {state.contactSyncInfo ? (

@@ -87,6 +87,9 @@ type PluginAPI = {
     }>) => void;
     unregister: (toolNames: string[]) => void;
   };
+  shell: {
+    openExternal: (url: string) => Promise<void>;
+  };
 };
 
 let client: BlueBubblesClient | null = null;
@@ -99,6 +102,20 @@ let chatHistory: ChatHistoryManager | null = null;
 let webhookStarted = false;
 let unsubConfig: (() => void) | null = null;
 let toolCallStore: Record<string, any[]> = {}; // messageGuid -> toolCalls
+
+function showFdaBanner(api: PluginAPI): void {
+  api.ui.showBanner({
+    id: 'fda-permission',
+    text: 'iMessage contact photos require Full Disk Access. Go to System Settings → Privacy & Security → Full Disk Access and add Kai.',
+    variant: 'warning',
+    dismissible: true,
+    visible: true,
+  });
+}
+
+function hideFdaBanner(api: PluginAPI): void {
+  api.ui.hideBanner('fda-permission');
+}
 
 function getConfig(api: PluginAPI): BlueBubblesPluginConfig {
   return api.config.getPluginData() as BlueBubblesPluginConfig;
@@ -259,7 +276,13 @@ async function syncContactsFromBlueBubbles(api: PluginAPI): Promise<void> {
 
 async function syncNicknamesFromLocal(api: PluginAPI): Promise<void> {
   if (!iMessageNicknameCache || !contacts || !stateManager || !contactPhotoCache) return;
-  if (!iMessageNicknameCache.isAvailable()) return;
+
+  const availability = iMessageNicknameCache.isAvailable();
+  if (availability === 'not-found') return;
+  if (availability === 'permission-denied') {
+    showFdaBanner(api);
+    return;
+  }
 
   try {
     // Gather relevant addresses from chat participants to limit photo loading
@@ -300,6 +323,7 @@ async function syncNicknamesFromLocal(api: PluginAPI): Promise<void> {
     const allPhotos = contactPhotoCache.getPhotos();
     if (Object.keys(allPhotos).length > 0) {
       stateManager.setContactPhotos(allPhotos);
+      hideFdaBanner(api); // Photos loaded successfully, dismiss any permission warning
     }
 
     // Update sync info
@@ -683,6 +707,11 @@ async function handleSettingsAction(api: PluginAPI, action: string, data?: unkno
           });
         }
       }
+      break;
+    }
+
+    case 'openFdaSettings': {
+      api.shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles');
       break;
     }
 

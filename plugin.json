@@ -13,6 +13,7 @@
     "state:publish",
     "tools:register",
     "ui:panel",
+    "ui:banner",
     "ui:navigation",
     "ui:settings",
     "network:fetch",

@@ -280,26 +280,22 @@ export class IMessageNicknameCache {
     this.addressBookDir = join(homedir(), 'Library', 'Application Support', 'AddressBook');
   }
 
-  /** Check if the NickNameCache directory exists and is readable */
-  isAvailable(): boolean {
+  /** Check if the NickNameCache/AddressBook directories are accessible */
+  isAvailable(): 'available' | 'not-found' | 'permission-denied' {
     try {
-      // existsSync can return false if the app lacks Full Disk Access (TCC)
       const cacheExists = existsSync(this.cacheDir);
       const abExists = existsSync(this.addressBookDir);
-      if (!cacheExists && !abExists) {
-        // Check if the directories likely exist but are permission-blocked
-        // by testing a parent path that should always be accessible
-        const messagesDir = join(homedir(), 'Library', 'Messages');
-        if (existsSync(messagesDir)) {
-          // Messages dir exists but NickNameCache is not visible — likely TCC block
-          this.log.warn(
-            'iMessage NickNameCache directory not accessible. If running as an app, grant Full Disk Access in System Settings → Privacy & Security → Full Disk Access.',
-          );
-        }
+      if (cacheExists || abExists) return 'available';
+
+      // Check if the directories likely exist but are permission-blocked
+      const messagesDir = join(homedir(), 'Library', 'Messages');
+      if (existsSync(messagesDir)) {
+        // Messages dir exists but NickNameCache is not visible — likely TCC/FDA block
+        return 'permission-denied';
       }
-      return cacheExists || abExists;
+      return 'not-found';
     } catch {
-      return false;
+      return 'not-found';
     }
   }
 
@@ -310,8 +306,7 @@ export class IMessageNicknameCache {
     const names: Record<string, string> = {};
     const photos: Record<string, string> = {};
 
-    if (!this.isAvailable()) {
-      this.log.warn('iMessage NickNameCache not available at:', this.cacheDir);
+    if (this.isAvailable() !== 'available') {
       return { names, photos };
     }
 
