@@ -3,6 +3,7 @@ import { StateManager } from './state-manager.js';
 import { AIReplyEngine } from './ai-reply.js';
 import { ContactBook } from './contacts.js';
 import { ContactPhotoCache } from './contact-photos.js';
+import { IMessageNicknameCache, normalizeAddress as normalizeAddr } from './imessage-nickname-cache.js';
 import { ChatHistoryManager } from './chat-history.js';
 import { createWebhookHandler } from './webhook-handler.js';
 import { normalizeChat, normalizeMessage } from './message-normalizer.js';
@@ -93,6 +94,7 @@ let stateManager: StateManager | null = null;
 let aiReply: AIReplyEngine | null = null;
 let contacts: ContactBook | null = null;
 let contactPhotoCache: ContactPhotoCache | null = null;
+let iMessageNicknameCache: IMessageNicknameCache | null = null;
 let chatHistory: ChatHistoryManager | null = null;
 let webhookStarted = false;
 let unsubConfig: (() => void) | null = null;
@@ -154,10 +156,11 @@ async function connect(api: PluginAPI): Promise<void> {
     await loadChats(api);
     await startWebhook(api, config);
 
-    // Sync contact names and photos from BlueBubbles (non-blocking)
-    syncContactsFromBlueBubbles(api).catch((err) =>
-      api.log.warn('Failed to sync contacts from BlueBubbles:', err),
-    );
+    // Sync local nicknames first (loads photos for chat participants), then BB contacts
+    // Sequential so local photos are merged before BB sync pushes state to frontend
+    syncNicknamesFromLocal(api)
+      .then(() => syncContactsFromBlueBubbles(api))
+      .catch((err) => api.log.warn('Failed to sync contacts:', err));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     stateManager!.setConnectionStatus('error', msg);
@@ -252,6 +255,64 @@ async function syncContactsFromBlueBubbles(api: PluginAPI): Promise<void> {
     syncedCount: Object.keys(result.names).length,
     photoCount: Object.keys(result.photos).length,
   });
+}
+
+async function syncNicknamesFromLocal(api: PluginAPI): Promise<void> {
+  if (!iMessageNicknameCache || !contacts || !stateManager || !contactPhotoCache) return;
+  if (!iMessageNicknameCache.isAvailable()) return;
+
+  try {
+    // Gather relevant addresses from chat participants to limit photo loading
+    const chats = stateManager.getState().chats ?? [];
+    const relevantAddresses = new Set<string>();
+    for (const chat of chats) {
+      if (chat.participants) {
+        for (const p of chat.participants) {
+          if (p.address) {
+            relevantAddresses.add(normalizeAddr(p.address));
+          }
+        }
+      }
+    }
+
+    // If no chats loaded yet (startup), skip photos (pass empty set).
+    // Once chats are available, load photos for participants only.
+    const addrFilter = relevantAddresses.size > 0 ? relevantAddresses : new Set<string>();
+    const result = await iMessageNicknameCache.load(addrFilter);
+
+    // Merge photos and names into the contact photo cache (persists to disk)
+    contactPhotoCache.mergeLocalNicknames(result.photos, result.names);
+
+    // Sync names into ContactBook (only if not already user-set)
+    let namesUpdated = false;
+    for (const [address, name] of Object.entries(result.names)) {
+      if (!contacts.get(address)) {
+        contacts.set(address, name);
+        namesUpdated = true;
+      }
+    }
+
+    if (namesUpdated) {
+      stateManager.setContacts(contacts.getAll());
+    }
+
+    // Push photos to frontend state
+    const allPhotos = contactPhotoCache.getPhotos();
+    if (Object.keys(allPhotos).length > 0) {
+      stateManager.setContactPhotos(allPhotos);
+    }
+
+    // Update sync info
+    const allNames = contactPhotoCache.getNames();
+    stateManager.setContactSyncInfo({
+      syncedAddresses: Object.keys(allNames),
+      lastSyncTime: Date.now(),
+      syncedCount: Object.keys(allNames).length,
+      photoCount: Object.keys(allPhotos).length,
+    });
+  } catch (err) {
+    api.log.warn('Failed to sync iMessage nicknames from local cache:', err);
+  }
 }
 
 async function startWebhook(api: PluginAPI, config: BlueBubblesPluginConfig): Promise<void> {
@@ -449,10 +510,31 @@ async function handlePanelAction(api: PluginAPI, action: string, data?: unknown)
     }
 
     case 'startNewChat': {
-      const { addresses, message } = data as { addresses: string[]; message?: string };
+      const { addresses, message, attachments } = data as {
+        addresses: string[];
+        message?: string;
+        attachments?: Array<{ filename: string; mimeType: string; base64: string }>;
+      };
       try {
-        await client.createChat(addresses, message);
+        const newChat = await client.createChat(addresses, message);
         await loadChats(api);
+
+        // Send any attachments to the new chat
+        if (attachments?.length) {
+          const { writeFileSync, mkdirSync } = await import('fs');
+          const { join } = await import('path');
+          const { tmpdir } = await import('os');
+          const tmpDir = join(tmpdir(), 'kai-bb-attachments');
+          mkdirSync(tmpDir, { recursive: true });
+          for (const att of attachments) {
+            const tmpPath = join(tmpDir, `${Date.now()}-${att.filename}`);
+            writeFileSync(tmpPath, Buffer.from(att.base64, 'base64'));
+            await client.sendAttachment(newChat.guid, tmpPath, att.filename, att.mimeType);
+          }
+        }
+
+        // Auto-navigate to the new conversation
+        stateManager.setPendingChatGuid(newChat.guid);
       } catch (err) {
         api.log.error('Failed to create chat:', err);
       }
@@ -567,7 +649,10 @@ async function handleSettingsAction(api: PluginAPI, action: string, data?: unkno
     }
 
     case 'syncContacts': {
-      // Force re-sync by clearing cache staleness check
+      // Sync local iMessage nicknames first (higher priority photos)
+      await syncNicknamesFromLocal(api);
+
+      // Then sync from BlueBubbles API
       if (contactPhotoCache && client && stateManager && contacts) {
         const chats = stateManager.getState().chats;
         const addresses = new Set<string>();
@@ -611,6 +696,7 @@ export async function activate(api: PluginAPI): Promise<void> {
 
   contacts = new ContactBook(api.config);
   contactPhotoCache = new ContactPhotoCache(api.config);
+  iMessageNicknameCache = new IMessageNicknameCache(api.log);
   chatHistory = new ChatHistoryManager(api.config);
   toolCallStore = (api.config.getPluginData().toolCallStore as Record<string, any[]>) ?? {};
 
@@ -679,6 +765,14 @@ export async function activate(api: PluginAPI): Promise<void> {
   const config = getConfig(api);
   stateManager.setNotificationsEnabled(config.notifications !== false);
   api.state.set('configured', isConfigured(config));
+
+  // Sync local iMessage nicknames (deferred so plugin activation completes immediately)
+  setTimeout(() => {
+    syncNicknamesFromLocal(api).catch((err) =>
+      api.log.warn('Failed initial iMessage nickname sync:', err),
+    );
+  }, 0);
+
   if (isConfigured(config)) {
     connect(api).catch((err) => api.log.error('Initial connection failed:', err));
   }
@@ -696,6 +790,7 @@ export async function deactivate(): Promise<void> {
   aiReply = null;
   contacts = null;
   contactPhotoCache = null;
+  iMessageNicknameCache = null;
   chatHistory = null;
   webhookStarted = false;
 }

@@ -246,6 +246,11 @@ export class StateManager {
     this.stateApi.set('pendingChatGuid', null);
   }
 
+  setPendingChatGuid(guid: string): void {
+    this.state.pendingChatGuid = guid;
+    this.stateApi.set('pendingChatGuid', guid);
+  }
+
   private updateChatWithMessage(message: NormalizedMessage): void {
     const chatIdx = this.state.chats.findIndex((c) => c.guid === message.chatGuid);
     if (chatIdx >= 0) {

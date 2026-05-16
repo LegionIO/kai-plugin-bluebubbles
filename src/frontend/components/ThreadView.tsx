@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { MessageBubble } from './MessageBubble';
 import { ComposeBar } from './ComposeBar';
 import { ReactionPicker } from './ReactionPicker';
+import { RecipientPicker } from './RecipientPicker';
+import type { Recipient } from './RecipientPicker';
 import { Dropdown, AutoManualToggle, useModelCatalog, useProfileCatalog } from './ModelProfileSelectors';
 import { SettingsIcon, UserIcon, BrainIcon, WrenchIcon } from '../icons';
 import { useDarkMode } from '../hooks';
@@ -26,6 +28,12 @@ type ThreadViewProps = {
   threadSettings?: Record<string, unknown>;
   onSaveThreadSettings?: (settings: Record<string, unknown>) => void;
   onAttach?: (files: File[]) => void;
+  // Compose mode props
+  composeMode?: boolean;
+  composeRecipients?: Recipient[];
+  onComposeRecipientsChange?: (recipients: Recipient[]) => void;
+  onCommitCompose?: () => void;
+  contactPhotos?: Record<string, string>;
 };
 
 function formatDate(timestamp: number): string {
@@ -79,6 +87,11 @@ export function ThreadView({
   threadSettings,
   onSaveThreadSettings,
   onAttach,
+  composeMode,
+  composeRecipients,
+  onComposeRecipientsChange,
+  onCommitCompose,
+  contactPhotos,
 }: ThreadViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [reactionTarget, setReactionTarget] = useState<string | null>(null);
@@ -192,77 +205,86 @@ export function ThreadView({
         overflow: 'hidden',
       }}
     >
-      {/* Header */}
-      <div
-        className="flex items-center gap-3 border-b border-border/50 px-4 py-3"
-        style={{ flexShrink: 0 }}
-      >
-        <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-semibold">{chat.displayName}</h2>
-          {chat.isGroup && chat.participants?.length > 0 ? (
-            <div className="flex flex-wrap items-center gap-0.5 mt-0.5">
-              {chat.participants.map((p: any, idx: number) => {
-                const addr = p.address;
-                const saved = contacts?.[addr];
-                const isLast = idx === chat.participants.length - 1;
+      {/* Header: RecipientPicker in compose mode, normal header otherwise */}
+      {composeMode && onComposeRecipientsChange ? (
+        <RecipientPicker
+          contacts={contacts ?? {}}
+          contactPhotos={contactPhotos}
+          recipients={composeRecipients ?? []}
+          onRecipientsChange={onComposeRecipientsChange}
+        />
+      ) : (
+        <div
+          className="flex items-center gap-3 border-b border-border/50 px-4 py-3"
+          style={{ flexShrink: 0 }}
+        >
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm font-semibold">{chat.displayName}</h2>
+            {chat.isGroup && chat.participants?.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-0.5 mt-0.5">
+                {chat.participants.map((p: any, idx: number) => {
+                  const addr = p.address;
+                  const saved = contacts?.[addr];
+                  const isLast = idx === chat.participants.length - 1;
+                  return (
+                    <span key={addr} className="text-xs text-muted-foreground">
+                      <button
+                        type="button"
+                        onClick={() => { setEditingContact(addr); setContactNameInput(saved || p.displayName || ''); }}
+                        className={`hover:text-primary hover:underline ${saved ? '' : 'text-muted-foreground/60'}`}
+                        title={saved ? `Edit ${saved}` : `Save contact for ${addr}`}
+                      >
+                        {p.displayName || addr}
+                      </button>
+                      {isLast ? null : ', '}
+                    </span>
+                  );
+                })}
+              </div>
+            ) : !chat.isGroup && chat.participants?.length > 0 ? (
+              (() => {
+                const addr = chat.participants[0]?.address;
+                const saved = addr ? contacts?.[addr] : null;
                 return (
-                  <span key={addr} className="text-xs text-muted-foreground">
+                  <div className="flex items-center gap-2 mt-0.5">
                     <button
                       type="button"
-                      onClick={() => { setEditingContact(addr); setContactNameInput(saved || p.displayName || ''); }}
-                      className={`hover:text-primary hover:underline ${saved ? '' : 'text-muted-foreground/60'}`}
-                      title={saved ? `Edit ${saved}` : `Save contact for ${addr}`}
+                      onClick={() => { if (addr) { setEditingContact(addr); setContactNameInput(saved || ''); } }}
+                      className="text-xs text-muted-foreground hover:text-primary hover:underline"
+                      title={saved ? `Edit contact for ${addr}` : `Save contact for ${addr}`}
                     >
-                      {p.displayName || addr}
+                      {addr ?? chat.service}
                     </button>
-                    {isLast ? null : ', '}
-                  </span>
+                  </div>
                 );
-              })}
-            </div>
-          ) : !chat.isGroup && chat.participants?.length > 0 ? (
-            (() => {
-              const addr = chat.participants[0]?.address;
-              const saved = addr ? contacts?.[addr] : null;
-              return (
-                <div className="flex items-center gap-2 mt-0.5">
-                  <button
-                    type="button"
-                    onClick={() => { if (addr) { setEditingContact(addr); setContactNameInput(saved || ''); } }}
-                    className="text-xs text-muted-foreground hover:text-primary hover:underline"
-                    title={saved ? `Edit contact for ${addr}` : `Save contact for ${addr}`}
-                  >
-                    {addr ?? chat.service}
-                  </button>
-                </div>
-              );
-            })()
-          ) : (
-            <span className="text-xs text-muted-foreground">{chat.service}</span>
-          )}
-        </div>
+              })()
+            ) : (
+              <span className="text-xs text-muted-foreground">{chat.service}</span>
+            )}
+          </div>
 
-        {/* Thread settings gear button */}
-        {onSaveThreadSettings ? (
-          <button
-            type="button"
-            onClick={() => setShowThreadSettings(!showThreadSettings)}
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              padding: '4px',
-              opacity: showThreadSettings ? 1 : 0.5,
-              color: 'var(--color-foreground, inherit)',
-              display: 'flex',
-              alignItems: 'center',
-            }}
-            title="Thread AI settings"
-          >
-            <SettingsIcon size={16} />
-          </button>
-        ) : null}
-      </div>
+          {/* Thread settings gear button */}
+          {onSaveThreadSettings ? (
+            <button
+              type="button"
+              onClick={() => setShowThreadSettings(!showThreadSettings)}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '4px',
+                opacity: showThreadSettings ? 1 : 0.5,
+                color: 'var(--color-foreground, inherit)',
+                display: 'flex',
+                alignItems: 'center',
+              }}
+              title="Thread AI settings"
+            >
+              <SettingsIcon size={16} />
+            </button>
+          ) : null}
+        </div>
+      )}
 
       {/* Per-thread AI settings panel */}
       {showThreadSettings && onSaveThreadSettings ? (
@@ -319,6 +341,7 @@ export function ThreadView({
 
       {/* Messages area */}
       <div
+        onMouseDown={composeMode ? onCommitCompose : undefined}
         style={{
           position: 'relative',
           flex: '1 1 0',
@@ -451,14 +474,15 @@ export function ThreadView({
       </div>
 
       {/* Compose bar */}
-      <ComposeBar
-        onSend={(text: string, attachments?: File[]) => {
-          if (attachments?.length) {
-            onAttach?.(attachments);
-          }
-          if (text) {
-            onSendMessage(text);
-          }
+      <div onFocusCapture={composeMode ? onCommitCompose : undefined}>
+        <ComposeBar
+          onSend={(text: string, attachments?: File[]) => {
+            if (attachments?.length) {
+              onAttach?.(attachments);
+            }
+            if (text) {
+              onSendMessage(text);
+            }
         }}
         allowAttach={Boolean(onAttach)}
         sending={sendingMessage}
@@ -466,6 +490,7 @@ export function ThreadView({
         onCancelReply={() => onSetReplyTo(null)}
         onTyping={onTyping}
       />
+      </div>
     </div>
   );
 }

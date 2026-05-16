@@ -176,6 +176,16 @@ export function WrenchIcon({ className, size }: IconProps) {
   );
 }
 
+export function ComposeIcon({ className, size }: IconProps) {
+  const s = size ? String(size) : svgBase.width;
+  return (
+    <svg {...svgBase} width={s} height={s} className={className}>
+      <path d="M12 20h9" />
+      <path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838.838-2.872a2 2 0 0 1 .506-.855z" />
+    </svg>
+  );
+}
+
 export function ChevronDownIcon({ className, size }: IconProps) {
   const s = size ? String(size) : svgBase.width;
   return (

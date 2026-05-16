@@ -120,6 +120,16 @@ export function SettingsView({
 
   const contactEntries = Object.entries((state.contacts ?? {}) as Record<string, string>);
 
+  // Group contacts by name to collapse duplicates (e.g. "SPAM" with 50+ numbers)
+  const groupedContacts = React.useMemo(() => {
+    const groups = new Map<string, string[]>();
+    for (const [address, name] of contactEntries) {
+      if (!groups.has(name)) groups.set(name, []);
+      groups.get(name)!.push(address);
+    }
+    return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [contactEntries.length, state.contacts]);
+
   return (
     <div className="space-y-6">
       {/* Connection section */}
@@ -371,24 +381,33 @@ export function SettingsView({
           </div>
         ) : null}
 
-        {contactEntries.length > 0 ? (
-          <div className="rounded-lg border border-border/50 overflow-hidden mb-3">
+        {groupedContacts.length > 0 ? (
+          <div className="rounded-lg border border-border/50 overflow-hidden mb-3 max-h-80 overflow-y-auto">
             <table className="w-full text-sm">
-              <thead>
+              <thead className="sticky top-0 bg-card z-10">
                 <tr className="border-b border-border/50 bg-muted/20">
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Address</th>
                   <th className="px-3 py-2 text-left font-medium text-muted-foreground">Name</th>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Addresses</th>
                   <th className="px-3 py-2 text-left font-medium text-muted-foreground w-16">Source</th>
                   <th className="px-3 py-2 w-16" />
                 </tr>
               </thead>
               <tbody>
-                {contactEntries.map(([address, name]) => {
-                  const isSynced = state.contactSyncInfo?.syncedAddresses?.includes(address);
+                {groupedContacts.map(([name, addresses]) => {
+                  const isSynced = addresses.some(a => state.contactSyncInfo?.syncedAddresses?.includes(a));
                   return (
-                    <tr key={address} className="border-b border-border/30 last:border-0">
-                      <td className="px-3 py-2 font-mono text-xs">{address}</td>
-                      <td className="px-3 py-2">{name}</td>
+                    <tr key={name + addresses[0]} className="border-b border-border/30 last:border-0">
+                      <td className="px-3 py-2 font-medium">{name}</td>
+                      <td className="px-3 py-2 font-mono text-xs">
+                        {addresses.length <= 3 ? (
+                          addresses.join(', ')
+                        ) : (
+                          <span title={addresses.join('\n')}>
+                            {addresses.slice(0, 2).join(', ')}
+                            <span className="text-muted-foreground ml-1">+{addresses.length - 2} more</span>
+                          </span>
+                        )}
+                      </td>
                       <td className="px-3 py-2">
                         {isSynced ? (
                           <span className="inline-flex items-center rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-400">
@@ -403,10 +422,14 @@ export function SettingsView({
                       <td className="px-3 py-2">
                         <button
                           type="button"
-                          onClick={() => onAction('deleteContact', { address })}
+                          onClick={() => {
+                            for (const address of addresses) {
+                              onAction('deleteContact', { address });
+                            }
+                          }}
                           className="text-xs text-red-400 hover:text-red-300"
                         >
-                          Remove
+                          Remove{addresses.length > 1 ? ' all' : ''}
                         </button>
                       </td>
                     </tr>

@@ -1,8 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { ChatList } from './ChatList';
 import { ThreadView } from './ThreadView';
 import { EmptyState } from './EmptyState';
 import { ConnectionStatus } from './ConnectionStatus';
+import { ComposeBar } from './ComposeBar';
+import { RecipientPicker } from './RecipientPicker';
+import type { Recipient } from './RecipientPicker';
 import type { PluginComponentProps } from '../hooks';
 
 function digitsOnly(value: unknown): string {
@@ -111,6 +114,8 @@ export function PanelView({
   const [replyToGuid, setReplyToGuid] = useState<string | null>(null);
   const [searchFilter, setSearchFilter] = useState('');
   const [localThreadSettings, setLocalThreadSettings] = useState<Record<string, unknown> | null>(null);
+  const [composing, setComposing] = useState(false);
+  const [composeRecipients, setComposeRecipients] = useState<Recipient[]>([]);
 
   useEffect(() => {
     onAction('loadChats');
@@ -127,6 +132,8 @@ export function PanelView({
   const handleSelectChat = useCallback((chatGuid: string) => {
     setReplyToGuid(null);
     setLocalThreadSettings(null);
+    setComposing(false);
+    setComposeRecipients([]);
     onAction('selectChat', { chatGuid });
   }, [onAction]);
 
@@ -210,7 +217,103 @@ export function PanelView({
     }
   }, [onAction, state.activeChatGuid]);
 
+  const handleStartNewChat = useCallback((addresses: string[], message?: string, attachments?: Array<{ filename: string; mimeType: string; base64: string }>) => {
+    onAction('startNewChat', { addresses, message, attachments });
+    setComposing(false);
+    setComposeRecipients([]);
+  }, [onAction]);
+
+  // Clear compose mode when a new chat is navigated to via pendingChatGuid
+  useEffect(() => {
+    if (state.pendingChatGuid && composing) {
+      setComposing(false);
+      setComposeRecipients([]);
+    }
+  }, [state.pendingChatGuid]);
+
   const chats = (state.chats ?? []) as any[];
+
+  // Find existing chat that matches the selected compose recipients exactly
+  const matchedComposeChat = useMemo(() => {
+    if (!composing || composeRecipients.length === 0) return null;
+    const selectedAddresses = composeRecipients.map((r) => r.address).sort();
+    return chats.find((chat: any) => {
+      const chatAddresses = (chat.participants ?? [])
+        .map((p: any) => p.address)
+        .sort();
+      return (
+        chatAddresses.length === selectedAddresses.length &&
+        chatAddresses.every((addr: string, i: number) => addr === selectedAddresses[i])
+      );
+    }) ?? null;
+  }, [composing, composeRecipients, chats]);
+
+  // Auto-load matched chat messages when compose recipients match an existing conversation
+  useEffect(() => {
+    if (composing && matchedComposeChat) {
+      onAction('selectChat', { chatGuid: matchedComposeChat.guid });
+    }
+  }, [composing, matchedComposeChat?.guid]);
+
+  // Commit compose: user engaged with thread → exit compose mode, keep the chat selected
+  const handleCommitCompose = useCallback(() => {
+    setComposing(false);
+    setComposeRecipients([]);
+  }, []);
+
+  // Handle sending from compose mode (for the "no match" empty compose case)
+  const handleComposeSend = useCallback((text: string, attachments?: File[]) => {
+    if (composeRecipients.length === 0) return;
+
+    if (matchedComposeChat) {
+      // Send to existing conversation
+      if (text) {
+        onAction('sendMessage', { chatGuid: matchedComposeChat.guid, text });
+      }
+      if (attachments?.length) {
+        for (const file of attachments) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const base64 = (reader.result as string).split(',')[1];
+            onAction('sendAttachmentFromUI', {
+              chatGuid: matchedComposeChat.guid,
+              filename: file.name,
+              mimeType: file.type,
+              base64,
+            });
+          };
+          reader.readAsDataURL(file);
+        }
+      }
+      setComposing(false);
+      setComposeRecipients([]);
+    } else {
+      // Create new conversation
+      const addresses = composeRecipients.map((r) => r.address);
+      if (attachments?.length) {
+        const encoded: Array<{ filename: string; mimeType: string; base64: string }> = [];
+        let pending = attachments.length;
+        for (const file of attachments) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            encoded.push({
+              filename: file.name,
+              mimeType: file.type,
+              base64: (reader.result as string).split(',')[1],
+            });
+            pending--;
+            if (pending === 0) {
+              handleStartNewChat(addresses, text || undefined, encoded);
+            }
+          };
+          reader.readAsDataURL(file);
+        }
+      } else {
+        handleStartNewChat(addresses, text || undefined);
+      }
+    }
+  }, [composeRecipients, matchedComposeChat, onAction, handleStartNewChat]);
+
   const filteredChats = searchFilter
     ? chats.filter((c: any) =>
         chatMatchesSearch(
@@ -228,24 +331,79 @@ export function PanelView({
 
   return (
     <div className="flex overflow-hidden rounded-2xl" style={{ height: 'calc(100vh - 8rem)', minHeight: '500px' }}>
-      {/* Left sidebar - Chat list */}
+      {/* Left sidebar - Always shows chat list */}
       <div className="flex flex-col shrink-0 h-full min-h-0 overflow-hidden border-r border-border/50" style={{ width: '320px' }}>
         <ConnectionStatus status={state.connectionStatus} error={state.error} />
         <ChatList
           chats={filteredChats}
-          activeChatGuid={state.activeChatGuid}
+          activeChatGuid={composing ? null : state.activeChatGuid}
           loadingChats={state.loadingChats}
           searchFilter={searchFilter}
           onSearchChange={setSearchFilter}
           onSelectChat={handleSelectChat}
           onDeleteChat={handleDeleteChat}
+          onCompose={() => { setComposing(true); setComposeRecipients([]); }}
           contactPhotos={state.contactPhotos ?? {}}
         />
       </div>
 
-      {/* Right content - Thread view or empty state */}
+      {/* Right content - Thread view, compose mode, or empty state */}
       <div className="flex flex-1 flex-col h-full min-h-0 min-w-0 overflow-hidden">
-        {state.activeChatGuid && activeChat ? (
+        {composing && matchedComposeChat && activeChat ? (
+          // Compose mode with matching existing chat → full interactive ThreadView with recipient picker
+          <ThreadView
+            chat={activeChat}
+            messages={state.activeChatMessages ?? []}
+            sendingMessage={state.sendingMessage}
+            loadingMessages={state.loadingMessages}
+            typingIndicator={(state.typingIndicators?.[state.activeChatGuid] ?? false) || (state.aiReplyProcessing?.[state.activeChatGuid] ?? false)}
+            privateApiEnabled={state.privateApiEnabled}
+            replyToGuid={replyToGuid}
+            onSendMessage={handleSendMessage}
+            onSendReaction={handleSendReaction}
+            onEditMessage={handleEditMessage}
+            onUnsendMessage={handleUnsendMessage}
+            onSetReplyTo={setReplyToGuid}
+            onLoadMore={handleLoadMore}
+            onSaveContact={handleSaveContact}
+            contacts={state.contacts ?? {}}
+            onTyping={handleTyping}
+            threadSettings={localThreadSettings ?? (state.activeChatGuid ? (config.threadSettings?.[state.activeChatGuid] ?? {}) : {})}
+            onSaveThreadSettings={handleSaveThreadSettings}
+            onAttach={handleAttach}
+            composeMode={true}
+            composeRecipients={composeRecipients}
+            onComposeRecipientsChange={setComposeRecipients}
+            onCommitCompose={handleCommitCompose}
+            contactPhotos={state.contactPhotos ?? {}}
+          />
+        ) : composing ? (
+          // Compose mode with no matching chat → empty compose view
+          <div className="flex h-full flex-col" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
+            <RecipientPicker
+              contacts={state.contacts ?? {}}
+              contactPhotos={state.contactPhotos ?? {}}
+              recipients={composeRecipients}
+              onRecipientsChange={setComposeRecipients}
+            />
+            <div className="flex-1 flex items-center justify-center">
+              <span className="text-sm text-muted-foreground/50">
+                {composeRecipients.length === 0
+                  ? 'Add recipients to start a conversation'
+                  : 'Send a message to start the conversation'}
+              </span>
+            </div>
+            {composeRecipients.length > 0 && (
+              <ComposeBar
+                onSend={handleComposeSend}
+                allowAttach={true}
+                sending={false}
+                replyTo={null}
+                onCancelReply={() => {}}
+              />
+            )}
+          </div>
+        ) : state.activeChatGuid && activeChat ? (
           <ThreadView
             chat={activeChat}
             messages={state.activeChatMessages ?? []}

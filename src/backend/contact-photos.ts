@@ -41,6 +41,7 @@ type ConfigAPI = {
 export class ContactPhotoCache {
   private photos: Record<string, string> = {};
   private names: Record<string, string> = {};
+  private bbPhotos: Record<string, string> = {}; // BB-only photos for disk persistence
   private configApi: ConfigAPI;
 
   constructor(configApi: ConfigAPI) {
@@ -62,14 +63,27 @@ export class ContactPhotoCache {
     const cached = data.contactPhotoCache as CachedContactData | undefined;
     if (cached) {
       this.photos = cached.photos ?? {};
+      this.bbPhotos = { ...(cached.photos ?? {}) };
       this.names = cached.names ?? {};
     }
   }
 
-  /** Save current state to disk */
+  /** Save current state to disk (only persists BB photos, not large local ones) */
   private persistToDisk(): void {
     const cached: CachedContactData = {
-      photos: this.photos,
+      photos: this.bbPhotos,
+      names: this.names,
+      lastFetched: Date.now(),
+    };
+    this.configApi.setPluginData('contactPhotoCache', cached);
+  }
+
+  /** Save only names to disk (photos are too large for settings JSON) */
+  private persistNamesToDisk(): void {
+    const data = this.configApi.getPluginData();
+    const existing = data.contactPhotoCache as CachedContactData | undefined;
+    const cached: CachedContactData = {
+      photos: existing?.photos ?? {},  // keep only previously-persisted BB photos
       names: this.names,
       lastFetched: Date.now(),
     };
@@ -98,6 +112,7 @@ export class ContactPhotoCache {
       for (const addr of allAddresses) {
         if (dataUri) {
           this.photos[addr] = dataUri;
+          this.bbPhotos[addr] = dataUri; // track for disk persistence
         }
         if (displayName) {
           this.names[addr] = displayName;
@@ -107,6 +122,28 @@ export class ContactPhotoCache {
 
     this.persistToDisk();
     return { photos: { ...this.photos }, names: { ...this.names } };
+  }
+
+  /**
+   * Merge locally-sourced iMessage nickname photos and names.
+   * iMessage shared photos take priority over BlueBubbles photos
+   * (they represent the person's chosen identity).
+   * Note: Only names are persisted to disk; photos are kept in-memory only
+   * to avoid bloating the settings JSON.
+   */
+  mergeLocalNicknames(localPhotos: Record<string, string>, localNames: Record<string, string>): void {
+    // iMessage photos override BB photos (higher quality / user-chosen)
+    for (const [addr, dataUri] of Object.entries(localPhotos)) {
+      this.photos[addr] = dataUri;
+    }
+    // iMessage names fill in gaps (don't override existing BB names)
+    for (const [addr, name] of Object.entries(localNames)) {
+      if (!this.names[addr]) {
+        this.names[addr] = name;
+      }
+    }
+    // Only persist names (not photos — they're too large for settings JSON)
+    this.persistNamesToDisk();
   }
 
   getPhotos(): Record<string, string> {

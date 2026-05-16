@@ -1,5 +1,5 @@
 import React from 'react';
-import { SearchIcon } from '../icons';
+import { SearchIcon, ComposeIcon } from '../icons';
 import { ChatAvatar } from './ChatAvatar';
 
 type ChatListProps = {
@@ -10,6 +10,7 @@ type ChatListProps = {
   onSearchChange: (value: string) => void;
   onSelectChat: (chatGuid: string) => void;
   onDeleteChat?: (chatGuid: string) => void;
+  onCompose?: () => void;
   contactPhotos?: Record<string, string>;
 };
 
@@ -39,6 +40,7 @@ export function ChatList({
   onSearchChange,
   onSelectChat,
   onDeleteChat,
+  onCompose,
   contactPhotos = {},
 }: ChatListProps) {
   return (
@@ -79,6 +81,16 @@ export function ChatList({
             style={{ paddingLeft: '32px' }}
             className="w-full rounded-lg border border-border/50 bg-muted/30 py-1.5 pr-3 text-sm placeholder:text-muted-foreground/60 focus:border-primary/50 focus:outline-none"
           />
+          {onCompose && (
+            <button
+              type="button"
+              onClick={onCompose}
+              className="ml-2 flex-shrink-0 rounded-lg p-1.5 text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
+              title="New message"
+            >
+              <ComposeIcon className="h-4 w-4" size={16} />
+            </button>
+          )}
         </div>
       </div>
 
