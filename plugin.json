@@ -22,7 +22,8 @@
     "navigation:open",
     "conversations:read",
     "conversations:write",
-    "agent:backend"
+    "agent:backend",
+    "agent:generate"
   ],
   "configSchema": {
     "type": "object",
