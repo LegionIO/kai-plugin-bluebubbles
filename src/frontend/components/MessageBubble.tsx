@@ -13,6 +13,7 @@ type MessageBubbleProps = {
   onEdit: (text: string) => void;
   onUnsend: () => void;
   onMediaLoad?: () => void;
+  onDownloadAttachment?: (guid: string, filename: string, mimeType: string) => void;
 };
 
 const REACTION_EMOJI: Record<string, string> = {
@@ -36,6 +37,7 @@ export function MessageBubble({
   onEdit,
   onUnsend,
   onMediaLoad,
+  onDownloadAttachment,
 }: MessageBubbleProps) {
   const [showMenu, setShowMenu] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -232,7 +234,16 @@ export function MessageBubble({
             {(message.attachments ?? []).length > 0 ? (
               <div className="mt-1.5 space-y-1">
                 {message.attachments.map((att: any) => (
-                  <AttachmentPreview key={att.guid} attachment={att} onLoad={onMediaLoad} />
+                  <AttachmentPreview
+                    key={att.guid}
+                    attachment={att}
+                    onLoad={onMediaLoad}
+                    onDownload={
+                      onDownloadAttachment
+                        ? () => onDownloadAttachment(att.guid, att.filename, att.mimeType)
+                        : undefined
+                    }
+                  />
                 ))}
               </div>
             ) : null}

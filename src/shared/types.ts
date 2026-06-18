@@ -215,7 +215,7 @@ export type ConversationMessage = {
   content: string;
   senderName?: string;
   timestamp: number;
-  attachments?: Array<{ url: string; mimeType: string }>;
+  attachments?: Array<{ guid?: string; url?: string; mimeType: string }>;
 };
 
 export type BlueBubblesPluginConfig = {

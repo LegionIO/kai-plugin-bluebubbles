@@ -11,6 +11,7 @@ type AttachmentPreviewProps = {
     downloadUrl: string;
   };
   onLoad?: () => void;
+  onDownload?: () => void;
 };
 
 function formatFileSize(bytes: number): string {
@@ -19,7 +20,7 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function AttachmentPreview({ attachment, onLoad }: AttachmentPreviewProps) {
+export function AttachmentPreview({ attachment, onLoad, onDownload }: AttachmentPreviewProps) {
   const isImage = attachment.mimeType.startsWith('image/');
   const isVideo = attachment.mimeType.startsWith('video/');
 
@@ -54,11 +55,11 @@ export function AttachmentPreview({ attachment, onLoad }: AttachmentPreviewProps
   }
 
   return (
-    <a
-      href={attachment.downloadUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="mt-1 flex items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-xs transition-colors hover:bg-white/20"
+    <button
+      type="button"
+      onClick={onDownload}
+      disabled={!onDownload}
+      className="mt-1 flex w-full items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-left text-xs transition-colors hover:bg-white/20 disabled:cursor-default disabled:opacity-60"
     >
       <svg
         xmlns="http://www.w3.org/2000/svg"
@@ -74,6 +75,6 @@ export function AttachmentPreview({ attachment, onLoad }: AttachmentPreviewProps
         <div className="truncate font-medium">{attachment.filename}</div>
         <div className="text-[10px] opacity-60">{formatFileSize(attachment.totalBytes)}</div>
       </div>
-    </a>
+    </button>
   );
 }

@@ -183,6 +183,10 @@ export function PanelView({
     onAction('saveContact', { address, name });
   }, [onAction]);
 
+  const handleDownloadAttachment = useCallback((guid: string, filename: string, mimeType: string) => {
+    onAction('downloadAttachment', { guid, filename, mimeType });
+  }, [onAction]);
+
   const handleSaveThreadSettings = useCallback((settings: Record<string, unknown>) => {
     if (state.activeChatGuid) {
       setLocalThreadSettings(settings);
@@ -371,6 +375,7 @@ export function PanelView({
             threadSettings={localThreadSettings ?? (state.activeChatGuid ? (config.threadSettings?.[state.activeChatGuid] ?? {}) : {})}
             onSaveThreadSettings={handleSaveThreadSettings}
             onAttach={handleAttach}
+            onDownloadAttachment={handleDownloadAttachment}
             composeMode={true}
             composeRecipients={composeRecipients}
             onComposeRecipientsChange={setComposeRecipients}
@@ -424,6 +429,7 @@ export function PanelView({
             threadSettings={localThreadSettings ?? (state.activeChatGuid ? (config.threadSettings?.[state.activeChatGuid] ?? {}) : {})}
             onSaveThreadSettings={handleSaveThreadSettings}
             onAttach={handleAttach}
+            onDownloadAttachment={handleDownloadAttachment}
           />
         ) : (
           <EmptyState

@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import { BlueBubblesClient } from './bb-client.js';
 import { StateManager } from './state-manager.js';
 import { AIReplyEngine } from './ai-reply.js';
@@ -9,6 +10,7 @@ import { createWebhookHandler } from './webhook-handler.js';
 import { normalizeChat, normalizeMessage } from './message-normalizer.js';
 import { processMessagesWithReactions } from './reaction-utils.js';
 import { buildBlueBubblesTools } from './tools.js';
+import { SecretStore } from './secret-store.js';
 import {
   PANEL_ID,
   NAV_ID,
@@ -90,6 +92,11 @@ type PluginAPI = {
   shell: {
     openExternal: (url: string) => Promise<void>;
   };
+  safeStorage?: {
+    isEncryptionAvailable: () => boolean;
+    encryptString: (plaintext: string) => string;
+    decryptString: (base64Cipher: string) => string;
+  };
 };
 
 let client: BlueBubblesClient | null = null;
@@ -99,6 +106,7 @@ let contacts: ContactBook | null = null;
 let contactPhotoCache: ContactPhotoCache | null = null;
 let iMessageNicknameCache: IMessageNicknameCache | null = null;
 let chatHistory: ChatHistoryManager | null = null;
+let secrets: SecretStore | null = null;
 let webhookStarted = false;
 let unsubConfig: (() => void) | null = null;
 let toolCallStore: Record<string, any[]> = {}; // messageGuid -> toolCalls
@@ -118,7 +126,12 @@ function hideFdaBanner(api: PluginAPI): void {
 }
 
 function getConfig(api: PluginAPI): BlueBubblesPluginConfig {
-  return api.config.getPluginData() as BlueBubblesPluginConfig;
+  const raw = api.config.getPluginData() as BlueBubblesPluginConfig;
+  return {
+    ...raw,
+    password: secrets?.get('password') ?? raw.password,
+    webhookSecret: secrets?.get('webhookSecret') ?? raw.webhookSecret,
+  };
 }
 
 function getAIReplyConfig(config: BlueBubblesPluginConfig): AIReplyConfig {
@@ -339,15 +352,32 @@ async function syncNicknamesFromLocal(api: PluginAPI): Promise<void> {
   }
 }
 
+async function stopWebhook(api: PluginAPI): Promise<void> {
+  if (!webhookStarted) return;
+  try { await api.http.close(); } catch { /* ignore */ }
+  webhookStarted = false;
+}
+
 async function startWebhook(api: PluginAPI, config: BlueBubblesPluginConfig): Promise<void> {
-  if (webhookStarted) {
-    try { await api.http.close(); } catch { /* ignore */ }
-    webhookStarted = false;
-  }
+  await stopWebhook(api);
 
   const port = config.webhookPort ?? DEFAULT_WEBHOOK_PORT;
   const host = config.webhookHost ?? DEFAULT_WEBHOOK_HOST;
-  const secret = config.webhookSecret ?? '';
+
+  let secret = config.webhookSecret ?? '';
+  if (!secret) {
+    secret = randomBytes(32).toString('hex');
+    secrets?.set('webhookSecret', secret);
+    api.log.info('Generated new webhook secret');
+    api.ui.showBanner({
+      id: 'webhook-secret-generated',
+      text: 'A webhook secret is now required. Update your BlueBubbles server webhook URL to include ?secret=… (copy it from BlueBubbles → Settings).',
+      variant: 'warning',
+      dismissible: true,
+      visible: true,
+    });
+  }
+  api.state.set('webhookSecret', secret);
 
   const aiConfig = getAIReplyConfig(config);
   const chunkConfig = getChunkConfig(config);
@@ -616,6 +646,35 @@ async function handlePanelAction(api: PluginAPI, action: string, data?: unknown)
       break;
     }
 
+    case 'downloadAttachment': {
+      const { guid, filename } = data as { guid: string; filename: string; mimeType?: string };
+      try {
+        const result = await client.fetchAttachmentAsBase64(guid);
+        if (!result) throw new Error('Attachment fetch returned empty');
+        const { writeFileSync, mkdirSync } = await import('fs');
+        const { join, basename } = await import('path');
+        const { tmpdir } = await import('os');
+        const { pathToFileURL } = await import('url');
+        const tmpDir = join(tmpdir(), 'kai-bb-attachments');
+        mkdirSync(tmpDir, { recursive: true });
+        const safeName = basename(filename || `attachment-${guid}`);
+        const tmpPath = join(tmpDir, `${Date.now()}-${safeName}`);
+        writeFileSync(tmpPath, Buffer.from(result.base64, 'base64'));
+        await api.shell.openExternal(pathToFileURL(tmpPath).href);
+        api.log.info(`Opened attachment: ${safeName}`);
+      } catch (err) {
+        api.log.error('Failed to download attachment:', err);
+        api.notifications.show({
+          id: 'download-attachment-error',
+          title: 'Failed to open attachment',
+          body: err instanceof Error ? err.message : String(err),
+          level: 'error',
+          autoDismissMs: 6000,
+        });
+      }
+      break;
+    }
+
     case 'sendAttachmentFromUI': {
       const { chatGuid, filename, mimeType, base64 } = data as { chatGuid: string; filename: string; mimeType: string; base64: string };
       try {
@@ -658,6 +717,47 @@ async function handleSettingsAction(api: PluginAPI, action: string, data?: unkno
   switch (action) {
     case 'testConnection': {
       await connect(api);
+      break;
+    }
+
+    case 'savePassword': {
+      const { password } = data as { password: string };
+      if (password) {
+        secrets?.set('password', password);
+        if ((api.config.getPluginData() as BlueBubblesPluginConfig).password) {
+          api.config.setPluginData('password', undefined);
+        }
+        api.state.set('hasPassword', true);
+        if (client) client.updateConfig(getConfig(api));
+        api.state.set('configured', isConfigured(getConfig(api)));
+      } else {
+        secrets?.delete('password');
+        if ((api.config.getPluginData() as BlueBubblesPluginConfig).password) {
+          api.config.setPluginData('password', undefined);
+        }
+        api.state.set('hasPassword', false);
+        if (client) client.updateConfig(getConfig(api));
+        await stopWebhook(api);
+        stateManager?.setConnectionStatus('disconnected');
+        api.state.set('configured', false);
+      }
+      break;
+    }
+
+    case 'regenerateWebhookSecret': {
+      const next = randomBytes(32).toString('hex');
+      secrets?.set('webhookSecret', next);
+      if ((api.config.getPluginData() as BlueBubblesPluginConfig).webhookSecret) {
+        api.config.setPluginData('webhookSecret', undefined);
+      }
+      api.state.set('webhookSecret', next);
+      // Restart the listener directly so the new secret is enforced even if
+      // the BlueBubbles server is currently unreachable.
+      if (client) {
+        await startWebhook(api, getConfig(api));
+      } else {
+        await stopWebhook(api);
+      }
       break;
     }
 
@@ -731,6 +831,52 @@ async function handleSettingsAction(api: PluginAPI, action: string, data?: unkno
 export async function activate(api: PluginAPI): Promise<void> {
   api.log.info('BlueBubbles plugin activating');
 
+  secrets = new SecretStore({
+    safeStorage: api.safeStorage,
+    config: api.config,
+    pluginDir: api.pluginDir,
+    log: api.log,
+  });
+
+  // One-time migration: move plaintext password/webhookSecret from plugin
+  // config into encrypted storage. Always clear the plaintext copies even if
+  // an encrypted value already exists (interrupted migration / external edit).
+  const rawConfig = api.config.getPluginData() as BlueBubblesPluginConfig;
+  if (rawConfig.password) {
+    if (!secrets.has('password')) {
+      secrets.set('password', rawConfig.password);
+      api.log.info('Migrated BlueBubbles password to encrypted storage');
+    }
+    api.config.setPluginData('password', undefined);
+  }
+  if (rawConfig.webhookSecret) {
+    if (!secrets.has('webhookSecret')) {
+      secrets.set('webhookSecret', rawConfig.webhookSecret);
+      api.log.info('Migrated webhook secret to encrypted storage');
+    }
+    api.config.setPluginData('webhookSecret', undefined);
+  }
+  // Scrub legacy ?password= URLs that ai-reply.ts previously persisted into
+  // chatHistories attachment metadata.
+  if (rawConfig.chatHistories) {
+    let scrubbed = false;
+    const histories = rawConfig.chatHistories as Record<string, Array<{ attachments?: Array<Record<string, unknown>> }>>;
+    for (const msgs of Object.values(histories)) {
+      for (const msg of msgs ?? []) {
+        for (const att of msg.attachments ?? []) {
+          if (typeof att.url === 'string' && att.url.includes('password=')) {
+            delete att.url;
+            scrubbed = true;
+          }
+        }
+      }
+    }
+    if (scrubbed) {
+      api.config.setPluginData('chatHistories', histories);
+      api.log.info('Scrubbed legacy password-bearing attachment URLs from chat history');
+    }
+  }
+
   contacts = new ContactBook(api.config);
   contactPhotoCache = new ContactPhotoCache(api.config);
   iMessageNicknameCache = new IMessageNicknameCache(api.log);
@@ -802,6 +948,9 @@ export async function activate(api: PluginAPI): Promise<void> {
   const config = getConfig(api);
   stateManager.setNotificationsEnabled(config.notifications !== false);
   api.state.set('configured', isConfigured(config));
+  api.state.set('hasPassword', secrets.has('password'));
+  api.state.set('secretsEncryptionMethod', secrets.encryptionMethod());
+  api.state.set('webhookSecret', secrets.get('webhookSecret') ?? '');
 
   // Sync local iMessage nicknames (deferred so plugin activation completes immediately)
   setTimeout(() => {
@@ -829,5 +978,6 @@ export async function deactivate(): Promise<void> {
   contactPhotoCache = null;
   iMessageNicknameCache = null;
   chatHistory = null;
+  secrets = null;
   webhookStarted = false;
 }

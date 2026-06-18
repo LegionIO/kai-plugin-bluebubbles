@@ -97,10 +97,28 @@ export function SettingsView({
   const [testing, setTesting] = useState(false);
   const [newContactAddr, setNewContactAddr] = useState('');
   const [newContactName, setNewContactName] = useState('');
+  const [passwordDraft, setPasswordDraft] = useState('');
+  const [secretCopied, setSecretCopied] = useState(false);
+
+  const hasPassword = Boolean(state.hasPassword);
+  const webhookSecret = (state.webhookSecret as string) ?? '';
 
   const updateField = useCallback((path: string, value: unknown) => {
     setPluginConfig?.(path, value);
   }, [setPluginConfig]);
+
+  const handleSavePassword = useCallback(() => {
+    onAction('savePassword', { password: passwordDraft });
+    setPasswordDraft('');
+  }, [onAction, passwordDraft]);
+
+  const handleCopySecret = useCallback(() => {
+    if (!webhookSecret) return;
+    void navigator.clipboard?.writeText(webhookSecret).then(() => {
+      setSecretCopied(true);
+      setTimeout(() => setSecretCopied(false), 1500);
+    });
+  }, [webhookSecret]);
 
   const handleTestConnection = useCallback(async () => {
     setTesting(true);
@@ -147,23 +165,53 @@ export function SettingsView({
           />
         </SettingsField>
 
-        <SettingsField label="Password">
-          <input
-            type="password"
-            value={(config as any).password ?? ''}
-            onChange={(e: any) => updateField('password', e.target.value)}
-            placeholder="Server password"
-            className={inputClass}
-          />
+        <SettingsField
+          label="Password"
+          description={
+            hasPassword
+              ? `Saved (encrypted via ${state.secretsEncryptionMethod === 'os-keychain' ? 'OS keychain' : 'AES-256-GCM'}). Enter a new value to replace it.`
+              : 'Stored encrypted via OS keychain (or AES-256-GCM fallback).'
+          }
+        >
+          <div className="flex gap-2">
+            <input
+              type="password"
+              value={passwordDraft}
+              onChange={(e: any) => setPasswordDraft(e.target.value)}
+              placeholder={hasPassword ? '•••••••• (saved)' : 'Server password'}
+              className={inputClass}
+            />
+            <button
+              type="button"
+              onClick={handleSavePassword}
+              disabled={!passwordDraft}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                passwordDraft
+                  ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                  : 'bg-muted/50 text-muted-foreground/30'
+              }`}
+            >
+              Save
+            </button>
+            {hasPassword && (
+              <button
+                type="button"
+                onClick={() => onAction('savePassword', { password: '' })}
+                className="rounded-lg border border-border/70 px-3 py-1.5 text-xs font-medium hover:bg-muted/30"
+              >
+                Clear
+              </button>
+            )}
+          </div>
         </SettingsField>
 
         <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={handleTestConnection}
-            disabled={testing || !(config as any).serverUrl || !(config as any).password}
+            disabled={testing || !(config as any).serverUrl || !hasPassword}
             className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-              testing || !(config as any).serverUrl || !(config as any).password
+              testing || !(config as any).serverUrl || !hasPassword
                 ? 'bg-muted/50 text-muted-foreground/30'
                 : 'bg-primary text-primary-foreground hover:bg-primary/90'
             }`}
@@ -213,21 +261,37 @@ export function SettingsView({
 
         <SettingsField
           label="Webhook Secret"
-          description="Optional secret to authenticate incoming webhook requests"
+          description="Auto-generated. Required to authenticate incoming webhook requests — add it to your BlueBubbles webhook URL below."
         >
-          <input
-            type="password"
-            value={(config as any).webhookSecret ?? ''}
-            onChange={(e: any) => updateField('webhookSecret', e.target.value)}
-            placeholder="Optional"
-            className={inputClass}
-          />
+          <div className="flex gap-2">
+            <input
+              type="text"
+              readOnly
+              value={webhookSecret || '(generated on first connect)'}
+              className={`${inputClass} font-mono text-[10px]`}
+            />
+            <button
+              type="button"
+              onClick={handleCopySecret}
+              disabled={!webhookSecret}
+              className="rounded-lg border border-border/70 px-3 py-1.5 text-xs font-medium hover:bg-muted/30 disabled:opacity-40"
+            >
+              {secretCopied ? 'Copied' : 'Copy'}
+            </button>
+            <button
+              type="button"
+              onClick={() => onAction('regenerateWebhookSecret')}
+              className="rounded-lg border border-border/70 px-3 py-1.5 text-xs font-medium hover:bg-muted/30"
+            >
+              Regenerate
+            </button>
+          </div>
         </SettingsField>
 
         <div className="rounded-lg bg-muted/30 p-3 text-xs text-muted-foreground space-y-1">
           <p className="font-medium">Webhook URL for BlueBubbles:</p>
-          <code className="block mt-1 text-primary/80 select-all">
-            {`http://<your-ip>:${(config as any).webhookPort ?? 8742}/webhook${(config as any).webhookSecret ? `?secret=${(config as any).webhookSecret}` : ''}`}
+          <code className="block mt-1 break-all text-primary/80 select-all">
+            {`http://<your-ip>:${(config as any).webhookPort ?? 8742}/webhook?secret=${webhookSecret || '<secret>'}`}
           </code>
         </div>
       </SettingsSection>

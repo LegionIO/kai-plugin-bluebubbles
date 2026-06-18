@@ -23,7 +23,8 @@
     "conversations:read",
     "conversations:write",
     "agent:backend",
-    "agent:generate"
+    "agent:generate",
+    "safe-storage"
   ],
   "configSchema": {
     "type": "object",

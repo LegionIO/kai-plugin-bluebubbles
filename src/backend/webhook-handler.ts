@@ -55,12 +55,10 @@ export function createWebhookHandler(options: WebhookHandlerOptions) {
       return { status: 405, body: '{"error":"Method not allowed"}' };
     }
 
-    if (webhookSecret) {
-      const provided = req.query.secret || req.headers['x-webhook-secret'] || '';
-      if (!safeEqual(provided, webhookSecret)) {
-        log.warn('Webhook auth failed');
-        return { status: 401, body: '{"error":"Unauthorized"}' };
-      }
+    const provided = req.query.secret || req.headers['x-webhook-secret'] || '';
+    if (!webhookSecret || !safeEqual(provided, webhookSecret)) {
+      log.warn('Webhook auth failed');
+      return { status: 401, body: '{"error":"Unauthorized"}' };
     }
 
     let event: BBWebhookEvent;

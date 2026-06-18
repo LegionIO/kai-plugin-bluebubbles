@@ -100,9 +100,11 @@ export class AIReplyEngine {
     const behavior = isGroup ? this.config.groupBehavior : this.config.dmBehavior;
     if (behavior === 'never') return;
 
-    // Append incoming message to history regardless of debounce
+    // Append incoming message to history regardless of debounce.
+    // Store only guid+mimeType — getAttachmentUrl() embeds ?password= and
+    // ChatHistoryManager persists this map to plugin config.
     const attachmentMeta = imageAttachments.map((a) => ({
-      url: this.client.getAttachmentUrl(a.guid!),
+      guid: a.guid!,
       mimeType: a.mimeType!,
     }));
     this.history.appendMessage(chatGuid, {
@@ -237,15 +239,31 @@ export class AIReplyEngine {
 
       if (mediaMatches.length > 0) {
         const { existsSync } = await import('fs');
-        const { join, basename, extname } = await import('path');
+        const { resolve, sep, basename, extname } = await import('path');
         const { homedir } = await import('os');
+
+        const mediaRoot = resolve(homedir(), '.kai', 'media');
 
         for (const media of mediaMatches) {
           try {
-            // Resolve kai-media://images/file.png -> ~/.kai/media/images/file.png
             const relativePath = media.url.replace(/^kai-media:\/\//, '');
-            const appHome = join(homedir(), '.kai');
-            const filePath = join(appHome, 'media', relativePath);
+            // Containment: reject traversal/absolute/control chars, then verify the
+            // resolved path stays under ~/.kai/media so LLM output can't exfiltrate
+            // arbitrary files via sendAttachment.
+            if (
+              relativePath.includes('..') ||
+              relativePath.startsWith('/') ||
+              relativePath.startsWith('\\') ||
+              relativePath.includes('\0')
+            ) {
+              this.log.warn(`Rejected kai-media path (unsafe segment): ${relativePath}`);
+              continue;
+            }
+            const filePath = resolve(mediaRoot, relativePath);
+            if (filePath !== mediaRoot && !filePath.startsWith(mediaRoot + sep)) {
+              this.log.warn(`Rejected kai-media path (escapes media root): ${filePath}`);
+              continue;
+            }
 
             if (existsSync(filePath)) {
               const filename = basename(filePath);

@@ -3,6 +3,7 @@ import type { ContactBook } from './contacts.js';
 import type { StateManager } from './state-manager.js';
 import type { ChatHistoryManager } from './chat-history.js';
 import { normalizeChat, normalizeMessage } from './message-normalizer.js';
+import { normalizeAddress } from './imessage-nickname-cache.js';
 import { processMessagesWithReactions } from './reaction-utils.js';
 import type { BlueBubblesPluginConfig, ChunkConfig } from '../shared/types.js';
 
@@ -341,13 +342,24 @@ export function buildBlueBubblesTools(deps: ToolDeps): ToolDefinition[] {
           const data = input as { address: string; text: string };
 
           const existingChats = stateManager?.getState().chats ?? [];
-          const match = existingChats.find(
-            (c) =>
-              !c.isGroup &&
-              c.participants.some(
-                (p) => p.address === data.address || p.address.replace(/\D/g, '').endsWith(data.address.replace(/\D/g, '')),
-              ),
+          const dmChats = existingChats.filter((c) => !c.isGroup);
+          const wantNorm = normalizeAddress(data.address);
+          const wantDigits = data.address.replace(/\D/g, '');
+
+          // Pass 1: exact normalized match (handles email + canonical phone).
+          let match = dmChats.find((c) =>
+            c.participants.some((p) => normalizeAddress(p.address) === wantNorm),
           );
+          // Pass 2: digit-suffix match, only when both sides have ≥7 digits, so
+          // empty/short inputs can't vacuously match the first DM via endsWith('').
+          if (!match && wantDigits.length >= 7) {
+            match = dmChats.find((c) =>
+              c.participants.some((p) => {
+                const pd = p.address.replace(/\D/g, '');
+                return pd.length >= 7 && pd.endsWith(wantDigits);
+              }),
+            );
+          }
 
           if (match) {
             const results = await client.sendChunkedText(

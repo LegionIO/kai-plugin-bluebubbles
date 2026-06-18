@@ -28,6 +28,7 @@ type ThreadViewProps = {
   threadSettings?: Record<string, unknown>;
   onSaveThreadSettings?: (settings: Record<string, unknown>) => void;
   onAttach?: (files: File[]) => void;
+  onDownloadAttachment?: (guid: string, filename: string, mimeType: string) => void;
   // Compose mode props
   composeMode?: boolean;
   composeRecipients?: Recipient[];
@@ -87,6 +88,7 @@ export function ThreadView({
   threadSettings,
   onSaveThreadSettings,
   onAttach,
+  onDownloadAttachment,
   composeMode,
   composeRecipients,
   onComposeRecipientsChange,
@@ -394,6 +396,7 @@ export function ThreadView({
                     onReply={() => onSetReplyTo(msg.guid)}
                     onEdit={(text: string) => onEditMessage(msg.guid, text)}
                     onUnsend={() => onUnsendMessage(msg.guid)}
+                    onDownloadAttachment={onDownloadAttachment}
                   />
                   {reactionTarget === msg.guid ? (
                     <ReactionPicker
