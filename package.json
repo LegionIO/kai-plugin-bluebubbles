@@ -1,6 +1,6 @@
 {
   "name": "kai-bluebubbles-plugin",
-  "version": "0.2.16",
+  "version": "0.2.17",
   "author": "Kyle Boyer <https://github.com/KyleBoyer>",
   "private": true,
   "type": "module",
