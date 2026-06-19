@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AttachmentPreview } from './AttachmentPreview';
 
 type MessageBubbleProps = {
@@ -43,7 +43,9 @@ export function MessageBubble({
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(message.text);
   const [hovered, setHovered] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const hoverHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const isMe = message.isFromMe;
 
@@ -73,7 +75,11 @@ export function MessageBubble({
 
   const handleContextMenu = (e: any) => {
     e.preventDefault();
-    setShowMenu(!showMenu);
+    e.stopPropagation();
+    clearHoverHideTimer();
+    setHovered(true);
+    setMenuPosition({ x: e.clientX, y: e.clientY });
+    setShowMenu(true);
   };
 
   const handleSubmitEdit = () => {
@@ -102,6 +108,46 @@ export function MessageBubble({
       setShowMenu(false);
     }, 180);
   };
+
+  useEffect(() => {
+    if (!showMenu) return;
+
+    const closeMenu = (event: MouseEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) return;
+      setShowMenu(false);
+    };
+    const closeOnScroll = () => setShowMenu(false);
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowMenu(false);
+    };
+
+    window.addEventListener('pointerdown', closeMenu);
+    window.addEventListener('scroll', closeOnScroll, true);
+    window.addEventListener('keydown', closeOnEscape);
+    window.addEventListener('blur', closeOnScroll);
+
+    return () => {
+      window.removeEventListener('pointerdown', closeMenu);
+      window.removeEventListener('scroll', closeOnScroll, true);
+      window.removeEventListener('keydown', closeOnEscape);
+      window.removeEventListener('blur', closeOnScroll);
+    };
+  }, [showMenu]);
+
+  useEffect(() => {
+    if (!showMenu || !menuPosition || !menuRef.current || typeof window === 'undefined') return;
+
+    const margin = 8;
+    const rect = menuRef.current.getBoundingClientRect();
+    const maxX = Math.max(margin, window.innerWidth - rect.width - margin);
+    const maxY = Math.max(margin, window.innerHeight - rect.height - margin);
+    const nextX = Math.max(margin, Math.min(menuPosition.x, maxX));
+    const nextY = Math.max(margin, Math.min(menuPosition.y, maxY));
+
+    if (nextX !== menuPosition.x || nextY !== menuPosition.y) {
+      setMenuPosition({ x: nextX, y: nextY });
+    }
+  }, [showMenu, menuPosition, privateApiEnabled, isMe]);
 
   const reactions = (message.reactions ?? []) as any[];
   const reactionGroups: Record<string, { count: number; hasFromMe: boolean; senders: string[] }> = {};
@@ -340,8 +386,20 @@ export function MessageBubble({
         ) : null}
 
         {/* Context menu */}
-        {showMenu ? (
-          <div className="mt-1 rounded-lg border border-border/50 bg-card shadow-lg p-1 text-xs">
+        {showMenu && menuPosition ? (
+          <div
+            ref={menuRef}
+            className="rounded-lg border border-border/50 bg-card shadow-lg p-1 text-xs"
+            style={{
+              position: 'fixed',
+              left: `${menuPosition.x}px`,
+              top: `${menuPosition.y}px`,
+              zIndex: 1000,
+              minWidth: '128px',
+            }}
+            onMouseEnter={showHoverControls}
+            onMouseLeave={hideHoverControls}
+          >
             {privateApiEnabled ? (
               <button
                 type="button"

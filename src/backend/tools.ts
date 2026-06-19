@@ -41,6 +41,9 @@ function requireClient(deps: ToolDeps): BlueBubblesClient {
   return client;
 }
 
+const MUTATING_TOOL_INSTRUCTION =
+  'If the user has clearly asked for or confirmed this action, perform it with this tool before your final completion response. If the request is ambiguous or not clearly authorized, ask for confirmation. You may send a brief progress text first, but do not end the turn until the tool call has succeeded or failed.';
+
 export function buildBlueBubblesTools(deps: ToolDeps): ToolDefinition[] {
   return [
     {
@@ -251,7 +254,7 @@ export function buildBlueBubblesTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'send-message',
       description:
-        'Send an iMessage or SMS text message to a conversation. The message will be sent from the Mac\'s iMessage/SMS account. For long messages, text is automatically split into smaller chunks. IMPORTANT: Always confirm with the user before sending a message on their behalf.',
+        `Send an iMessage or SMS text message to a conversation. The message will be sent from the Mac's iMessage/SMS account. For long messages, text is automatically split into smaller chunks. ${MUTATING_TOOL_INSTRUCTION}`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -317,7 +320,7 @@ export function buildBlueBubblesTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'send-message-to-contact',
       description:
-        'Send a message to a contact by their phone number or email address, without needing to know the chat GUID. Creates a new chat if one doesn\'t already exist. IMPORTANT: Always confirm with the user before sending a message on their behalf.',
+        `Send a message to a contact by their phone number or email address, without needing to know the chat GUID. Creates a new chat if one doesn't already exist. ${MUTATING_TOOL_INSTRUCTION}`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -406,7 +409,7 @@ export function buildBlueBubblesTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'unsend-message',
       description:
-        'Unsend/retract a previously sent iMessage. Only works for messages you sent, and only on iMessage (not SMS). The message will be removed from the conversation for all participants. Requires the Private API to be enabled on the BlueBubbles server.',
+        `Unsend/retract a previously sent iMessage. Only works for messages you sent, and only on iMessage (not SMS). The message will be removed from the conversation for all participants. Requires the Private API to be enabled on the BlueBubbles server. ${MUTATING_TOOL_INSTRUCTION}`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -438,7 +441,7 @@ export function buildBlueBubblesTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'react-to-message',
       description:
-        'Add an iMessage tapback reaction to a message. Available reactions: love (heart), like (thumbs up), dislike (thumbs down), laugh (haha), emphasize (exclamation marks), question (question mark).',
+        `Add an iMessage tapback reaction to a message. Available reactions: love (heart), like (thumbs up), dislike (thumbs down), laugh (haha), emphasize (exclamation marks), question (question mark). ${MUTATING_TOOL_INSTRUCTION}`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -479,7 +482,7 @@ export function buildBlueBubblesTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'edit-message',
       description:
-        'Edit a previously sent iMessage. Only works for messages you sent, and only on iMessage (not SMS). Requires the Private API to be enabled on the BlueBubbles server.',
+        `Edit a previously sent iMessage. Only works for messages you sent, and only on iMessage (not SMS). Requires the Private API to be enabled on the BlueBubbles server. ${MUTATING_TOOL_INSTRUCTION}`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -515,7 +518,7 @@ export function buildBlueBubblesTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'create-chat',
       description:
-        'Create a new iMessage or SMS conversation with one or more participants. For group chats, provide multiple addresses. Optionally send an initial message.',
+        `Create a new iMessage or SMS conversation with one or more participants. For group chats, provide multiple addresses. Optionally send an initial message. ${MUTATING_TOOL_INSTRUCTION}`,
       inputSchema: {
         type: 'object',
         properties: {

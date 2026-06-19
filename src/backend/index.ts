@@ -72,6 +72,24 @@ type PluginAPI = {
       systemPrompt?: string;
       tools?: boolean;
     }) => Promise<{ text: string; modelKey: string; toolCalls?: any[] }>;
+    stream?: (options: {
+      messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string | unknown[] }>;
+      modelKey?: string;
+      profileKey?: string;
+      reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
+      fallbackEnabled?: boolean;
+      systemPrompt?: string;
+      tools?: boolean;
+    }) => AsyncGenerator<{
+      type: string;
+      text?: string;
+      toolCallId?: string;
+      toolName?: string;
+      args?: unknown;
+      result?: unknown;
+      error?: string;
+      modelKey?: string;
+    }>;
   };
   log: {
     info: (...args: unknown[]) => void;

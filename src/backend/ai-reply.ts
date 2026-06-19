@@ -11,16 +11,37 @@ import type {
 } from '../shared/types.js';
 import { DEFAULT_AI_SYSTEM_PROMPT, DEFAULT_MAX_CHUNK_LENGTH } from '../shared/constants.js';
 
+type AgentGenerateOptions = {
+  messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string | unknown[] }>;
+  modelKey?: string;
+  profileKey?: string;
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
+  fallbackEnabled?: boolean;
+  systemPrompt?: string;
+  tools?: boolean;
+};
+
+type AgentStreamEvent = {
+  type: string;
+  text?: string;
+  toolCallId?: string;
+  toolName?: string;
+  args?: unknown;
+  result?: unknown;
+  error?: string;
+  modelKey?: string;
+};
+
+type AgentResult = {
+  text: string;
+  modelKey: string;
+  toolCalls?: any[];
+  historyText?: string;
+};
+
 type AgentAPI = {
-  generate: (options: {
-    messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string | unknown[] }>;
-    modelKey?: string;
-    profileKey?: string;
-    reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
-    fallbackEnabled?: boolean;
-    systemPrompt?: string;
-    tools?: boolean;
-  }) => Promise<{ text: string; modelKey: string; toolCalls?: any[] }>;
+  generate: (options: AgentGenerateOptions) => Promise<AgentResult>;
+  stream?: (options: AgentGenerateOptions) => AsyncGenerator<AgentStreamEvent>;
 };
 
 type LogAPI = {
@@ -75,6 +96,105 @@ export class AIReplyEngine {
 
   updateChunkConfig(config: ChunkConfig): void {
     this.chunkConfig = config;
+  }
+
+  private async sendTextChunks(chatGuid: string, text: string, toolCalls?: any[]): Promise<void> {
+    const chunks = chunkText(text, this.chunkConfig);
+    if (chunks.length === 0) return;
+
+    this.recentReplies.set(chatGuid, Date.now());
+
+    for (let i = 0; i < chunks.length; i++) {
+      const sentMsg = await this.client.sendText(chatGuid, chunks[i]);
+      this.stateCallback.onMessageSent?.(chatGuid, sentMsg, i === 0 ? toolCalls : undefined);
+    }
+  }
+
+  private isSafeInterimText(text: string): boolean {
+    const trimmed = text.trim();
+    return Boolean(
+      trimmed &&
+      trimmed !== '[NO_REPLY]' &&
+      !trimmed.includes('[NO_REPLY]') &&
+      !/\[REACT:/i.test(trimmed) &&
+      !/kai-media:\/\//i.test(trimmed),
+    );
+  }
+
+  private async generateReply(chatGuid: string, options: AgentGenerateOptions): Promise<AgentResult> {
+    if (!this.agent.stream) {
+      return this.agent.generate(options);
+    }
+
+    return this.generateReplyFromStream(chatGuid, options);
+  }
+
+  private async generateReplyFromStream(chatGuid: string, options: AgentGenerateOptions): Promise<AgentResult> {
+    let pendingText = '';
+    let historyText = '';
+    let modelKey = '';
+    let error: string | null = null;
+    let lastEventWasToolResult = false;
+    const toolCalls: any[] = [];
+    const pendingToolCalls = new Map<string, { toolName: string; args: unknown; startedAt: number }>();
+
+    for await (const event of this.agent.stream!(options)) {
+      if (event.type === 'text-delta' && event.text) {
+        if (lastEventWasToolResult && historyText.length > 0 && !historyText.endsWith('\n')) {
+          historyText += '\n\n';
+        }
+        pendingText += event.text;
+        historyText += event.text;
+        lastEventWasToolResult = false;
+      } else if (event.type === 'tool-call' && event.toolCallId) {
+        const interimText = pendingText.trim();
+        if (this.isSafeInterimText(interimText)) {
+          await this.sendTextChunks(chatGuid, interimText);
+          pendingText = '';
+        }
+
+        pendingToolCalls.set(event.toolCallId, {
+          toolName: event.toolName ?? 'unknown',
+          args: event.args,
+          startedAt: Date.now(),
+        });
+      } else if (event.type === 'tool-result' && event.toolCallId) {
+        lastEventWasToolResult = true;
+        const pending = pendingToolCalls.get(event.toolCallId);
+        toolCalls.push({
+          toolName: pending?.toolName ?? event.toolName ?? 'unknown',
+          args: pending?.args ?? {},
+          result: event.result,
+          durationMs: pending ? Date.now() - pending.startedAt : undefined,
+        });
+        pendingToolCalls.delete(event.toolCallId);
+      } else if (event.type === 'tool-error' && event.toolCallId) {
+        const pending = pendingToolCalls.get(event.toolCallId);
+        toolCalls.push({
+          toolName: pending?.toolName ?? event.toolName ?? 'unknown',
+          args: pending?.args ?? {},
+          result: null,
+          error: event.error ?? 'Tool execution failed',
+          durationMs: pending ? Date.now() - pending.startedAt : undefined,
+        });
+        pendingToolCalls.delete(event.toolCallId);
+      } else if (event.type === 'error') {
+        error = event.error ?? 'Unknown error';
+      } else if (event.type === 'done' && event.modelKey) {
+        modelKey = event.modelKey;
+      }
+    }
+
+    if (error && !historyText.trim()) {
+      throw new Error(error);
+    }
+
+    return {
+      text: pendingText.trim(),
+      modelKey,
+      toolCalls,
+      historyText: historyText.trim(),
+    };
   }
 
   async handleMessage(msg: BBMessage, chat?: NormalizedChat): Promise<void> {
@@ -180,7 +300,7 @@ export class AIReplyEngine {
 
       this.log.info(`AI generating reply for ${chatGuid} (${messages.length} messages in context)`);
 
-      const result = await this.agent.generate({
+      const result = await this.generateReply(chatGuid, {
         messages,
         systemPrompt,
         modelKey: threadSettings?.modelOverride ?? this.config.modelOverride,
@@ -190,12 +310,16 @@ export class AIReplyEngine {
         tools: true,
       });
 
-      // Stop typing before sending reply
-      if (typingInterval) { clearInterval(typingInterval); typingInterval = null; }
-
       let responseText = result.text.trim();
+      const historyText = (result.historyText ?? result.text).trim();
 
       if (!responseText || responseText === '[NO_REPLY]' || responseText.includes('[NO_REPLY]')) {
+        if (historyText && !historyText.includes('[NO_REPLY]')) {
+          this.history.appendMessage(chatGuid, {
+            role: 'assistant',
+            content: historyText,
+          });
+        }
         this.log.info(`AI decided not to reply in ${chatGuid}`);
         return;
       }
@@ -226,6 +350,12 @@ export class AIReplyEngine {
 
       // If only reactions and no text remaining, we're done
       if (!responseText || responseText === '[NO_REPLY]') {
+        if (historyText) {
+          this.history.appendMessage(chatGuid, {
+            role: 'assistant',
+            content: historyText,
+          });
+        }
         return;
       }
 
@@ -300,26 +430,18 @@ export class AIReplyEngine {
         this.recentReplies.set(chatGuid, Date.now());
         this.history.appendMessage(chatGuid, {
           role: 'assistant',
-          content: result.text.trim(),
+          content: historyText || result.text.trim(),
         });
         return;
       }
 
       // Chunk and send text
-      const chunks = chunkText(responseText, this.chunkConfig);
-      this.recentReplies.set(chatGuid, Date.now());
-
-      for (let i = 0; i < chunks.length; i++) {
-        const sentMsg = await this.client.sendText(chatGuid, chunks[i]);
-        if (this.stateCallback.onMessageSent) {
-          this.stateCallback.onMessageSent(chatGuid, sentMsg, i === 0 ? result.toolCalls : undefined);
-        }
-      }
+      await this.sendTextChunks(chatGuid, responseText, result.toolCalls);
 
       // Record in history
       this.history.appendMessage(chatGuid, {
         role: 'assistant',
-        content: responseText,
+        content: historyText || responseText,
       });
 
       this.log.info(`AI replied in ${chatGuid}: ${responseText.slice(0, 100)}...`);

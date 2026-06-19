@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { ChatList } from './ChatList';
 import { ThreadView } from './ThreadView';
 import { EmptyState } from './EmptyState';
@@ -116,9 +116,51 @@ export function PanelView({
   const [localThreadSettings, setLocalThreadSettings] = useState<Record<string, unknown> | null>(null);
   const [composing, setComposing] = useState(false);
   const [composeRecipients, setComposeRecipients] = useState<Recipient[]>([]);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [panelHeight, setPanelHeight] = useState<number | null>(null);
 
   useEffect(() => {
     onAction('loadChats');
+  }, []);
+
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel || typeof window === 'undefined') return;
+
+    const findScrollParent = () => {
+      let parent = panel.parentElement;
+      while (parent) {
+        const overflowY = window.getComputedStyle(parent).overflowY;
+        if ((overflowY === 'auto' || overflowY === 'scroll') && parent.clientHeight > 0) {
+          return parent;
+        }
+        parent = parent.parentElement;
+      }
+      return null;
+    };
+
+    const scrollParent = findScrollParent();
+    const measure = () => {
+      const rect = panel.getBoundingClientRect();
+      const parentRect = scrollParent?.getBoundingClientRect();
+      const parentStyle = scrollParent ? window.getComputedStyle(scrollParent) : null;
+      const parentBottom = parentRect?.bottom ?? window.innerHeight;
+      const bottomPadding = parentStyle ? Number.parseFloat(parentStyle.paddingBottom) || 0 : 0;
+      const nextHeight = Math.max(480, Math.floor(parentBottom - rect.top - bottomPadding));
+      setPanelHeight(nextHeight);
+    };
+
+    measure();
+    window.addEventListener('resize', measure);
+
+    const resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    resizeObserver?.observe(panel);
+    if (scrollParent) resizeObserver?.observe(scrollParent);
+
+    return () => {
+      window.removeEventListener('resize', measure);
+      resizeObserver?.disconnect();
+    };
   }, []);
 
   // Auto-select chat when navigated from notification
@@ -334,7 +376,11 @@ export function PanelView({
   const activeChat = chats.find((c: any) => c.guid === state.activeChatGuid);
 
   return (
-    <div className="flex overflow-hidden" style={{ height: '680px', minHeight: '480px' }}>
+    <div
+      ref={panelRef}
+      className="flex overflow-hidden"
+      style={{ height: panelHeight ? `${panelHeight}px` : 'calc(100vh - 8rem)', minHeight: '480px' }}
+    >
       {/* Left sidebar - Always shows chat list */}
       <div className="flex flex-col shrink-0 h-full min-h-0 overflow-hidden border-r border-border/50" style={{ width: '320px' }}>
         <ConnectionStatus status={state.connectionStatus} error={state.error} />
