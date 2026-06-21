@@ -110,17 +110,6 @@ export class AIReplyEngine {
     }
   }
 
-  private isSafeInterimText(text: string): boolean {
-    const trimmed = text.trim();
-    return Boolean(
-      trimmed &&
-      trimmed !== '[NO_REPLY]' &&
-      !trimmed.includes('[NO_REPLY]') &&
-      !/\[REACT:/i.test(trimmed) &&
-      !/kai-media:\/\//i.test(trimmed),
-    );
-  }
-
   private async generateReply(chatGuid: string, options: AgentGenerateOptions): Promise<AgentResult> {
     if (!this.agent.stream) {
       return this.agent.generate(options);
@@ -137,6 +126,14 @@ export class AIReplyEngine {
     let lastEventWasToolResult = false;
     const toolCalls: any[] = [];
     const pendingToolCalls = new Map<string, { toolName: string; args: unknown; startedAt: number }>();
+    const setBlockedText = (message: string) => {
+      pendingText = message;
+      if (historyText.trim()) {
+        historyText += `\n\n${message}`;
+      } else {
+        historyText = message;
+      }
+    };
 
     for await (const event of this.agent.stream!(options)) {
       if (event.type === 'text-delta' && event.text) {
@@ -147,12 +144,6 @@ export class AIReplyEngine {
         historyText += event.text;
         lastEventWasToolResult = false;
       } else if (event.type === 'tool-call' && event.toolCallId) {
-        const interimText = pendingText.trim();
-        if (this.isSafeInterimText(interimText)) {
-          await this.sendTextChunks(chatGuid, interimText);
-          pendingText = '';
-        }
-
         pendingToolCalls.set(event.toolCallId, {
           toolName: event.toolName ?? 'unknown',
           args: event.args,
@@ -178,11 +169,27 @@ export class AIReplyEngine {
           durationMs: pending ? Date.now() - pending.startedAt : undefined,
         });
         pendingToolCalls.delete(event.toolCallId);
+      } else if (event.type === 'max-steps-reached') {
+        setBlockedText("I hit my tool-step limit before I could finish that, so I can't confirm it completed.");
       } else if (event.type === 'error') {
         error = event.error ?? 'Unknown error';
       } else if (event.type === 'done' && event.modelKey) {
         modelKey = event.modelKey;
       }
+    }
+
+    for (const [toolCallId, pending] of pendingToolCalls.entries()) {
+      toolCalls.push({
+        toolName: pending.toolName,
+        args: pending.args ?? {},
+        result: null,
+        error: 'Tool call ended without a result.',
+        durationMs: Date.now() - pending.startedAt,
+      });
+      pendingToolCalls.delete(toolCallId);
+    }
+    if (toolCalls.some((toolCall) => toolCall.error === 'Tool call ended without a result.')) {
+      setBlockedText("A tool call ended before returning a result, so I can't confirm it completed.");
     }
 
     if (error && !historyText.trim()) {
