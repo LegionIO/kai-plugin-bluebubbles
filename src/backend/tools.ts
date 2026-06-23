@@ -254,7 +254,7 @@ export function buildBlueBubblesTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'send-message',
       description:
-        `Send an iMessage or SMS text message to a conversation. The message will be sent from the Mac's iMessage/SMS account. For long messages, text is automatically split into smaller chunks. ${MUTATING_TOOL_INSTRUCTION}`,
+        `Send an iMessage or SMS text message to a conversation. The message will be sent from the Mac's iMessage/SMS account. For long messages, text is automatically split into smaller chunks. During an AI auto-reply, use this for brief progress/status updates to the current chat when the system prompt provides its chat GUID; do not use it for the final auto-reply text. ${MUTATING_TOOL_INSTRUCTION}`,
       inputSchema: {
         type: 'object',
         properties: {

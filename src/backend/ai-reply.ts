@@ -98,6 +98,24 @@ export class AIReplyEngine {
     this.chunkConfig = config;
   }
 
+  private isLikelyContinuationCommand(text: string): boolean {
+    const normalized = text
+      .trim()
+      .toLowerCase()
+      .replace(/[.!?]+$/g, '')
+      .replace(/\s+/g, ' ');
+
+    if (!normalized) return false;
+
+    return (
+      /^(y|yes|yeah|yep|yup|sure|ok|okay|correct|confirmed|confirm)$/.test(normalized) ||
+      /^(do it|do that|do this|go ahead|please do|yes please|yep do it|yeah do it|ok do it|okay do it)$/.test(normalized) ||
+      /^(add it|run it|send it|make it|delete it|remove it|change it|fix it)$/.test(normalized) ||
+      /^(do it for real|for real|actually do it|really do it)$/.test(normalized) ||
+      /^(run|add|send|delete|remove|change|fix)\b/.test(normalized)
+    );
+  }
+
   private async sendTextChunks(chatGuid: string, text: string, toolCalls?: any[]): Promise<void> {
     const chunks = chunkText(text, this.chunkConfig);
     if (chunks.length === 0) return;
@@ -243,7 +261,8 @@ export class AIReplyEngine {
 
     // Debounce per chat — skip AI generation but message is still in history
     const lastReply = this.recentReplies.get(chatGuid) ?? 0;
-    if (Date.now() - lastReply < this.debounceMs) {
+    const bypassDebounce = this.isLikelyContinuationCommand(messageText);
+    if (Date.now() - lastReply < this.debounceMs && !bypassDebounce) {
       this.log.info(`Debounced AI reply for ${chatGuid} (${Date.now() - lastReply}ms since last)`);
       return;
     }
@@ -274,7 +293,7 @@ export class AIReplyEngine {
       startTyping();
 
       const threadSettings = this.getThreadSettings(chatGuid);
-      const systemPrompt = threadSettings?.systemPrompt || this.buildSystemPrompt(isGroup, chat);
+      const systemPrompt = this.buildSystemPrompt(isGroup, chat, chatGuid, threadSettings?.systemPrompt);
       const messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string | unknown[] }> =
         this.history.toAgentMessages(chatGuid);
 
@@ -460,13 +479,20 @@ export class AIReplyEngine {
     }
   }
 
-  private buildSystemPrompt(isGroup: boolean, chat?: NormalizedChat): string {
-    const base = this.config.systemPrompt || DEFAULT_AI_SYSTEM_PROMPT;
+  private buildSystemPrompt(
+    isGroup: boolean,
+    chat: NormalizedChat | undefined,
+    chatGuid: string,
+    overridePrompt?: string,
+  ): string {
+    const base = overridePrompt || this.config.systemPrompt || DEFAULT_AI_SYSTEM_PROMPT;
     const parts = [base];
+    const currentChatGuid = chat?.guid || chatGuid;
 
     if (chat) {
       parts.push('');
       parts.push(`Chat: ${chat.displayName}`);
+      parts.push(`BlueBubbles chat GUID: ${currentChatGuid}`);
       parts.push(`Service: ${chat.service}`);
       parts.push(`Type: ${isGroup ? 'Group chat' : 'Direct message'}`);
 
@@ -477,7 +503,17 @@ export class AIReplyEngine {
         });
         parts.push(`Participants: ${names.join(', ')}`);
       }
+    } else {
+      parts.push('');
+      parts.push(`BlueBubbles chat GUID: ${currentChatGuid}`);
     }
+
+    parts.push('');
+    parts.push('Tool progress updates:');
+    parts.push(`- Your ordinary final response is buffered and sent automatically after the tool loop finishes.`);
+    parts.push(`- For long-running work, you may call send-message with chatGuid "${currentChatGuid}" to send a brief progress/status update before continuing.`);
+    parts.push('- Do not use send-message for the final answer to this same incoming message; return final text normally after the needed tools succeed or fail.');
+    parts.push('- After any progress update, keep working until you can provide a final completion or blocked message.');
 
     if (isGroup && this.config.groupBehavior === 'smart') {
       parts.push('');
