@@ -25,6 +25,34 @@ const REACTION_EMOJI: Record<string, string> = {
   question: '❓',
 };
 
+function stringifyToolError(value: any): string | undefined {
+  if (typeof value === 'string') return value.trim() || undefined;
+  if (value && typeof value === 'object') {
+    if (typeof value.message === 'string' && value.message.trim()) return value.message.trim();
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return 'Tool execution failed';
+    }
+  }
+  return undefined;
+}
+
+function getToolCallError(toolCall: any): string | undefined {
+  if (toolCall?.error) return stringifyToolError(toolCall.error) ?? 'Tool execution failed';
+
+  const result = toolCall?.result;
+  if (!result || typeof result !== 'object') return undefined;
+
+  const explicitError = stringifyToolError(result.error);
+  if (result.isError === true) return explicitError ?? stringifyToolError(result.message) ?? 'Tool returned isError: true';
+  if (result.success === false || result.ok === false) return explicitError ?? stringifyToolError(result.message) ?? 'Tool returned an unsuccessful result';
+  if (typeof result.exitCode === 'number' && result.exitCode !== 0) {
+    return explicitError ?? stringifyToolError(result.stderr) ?? stringifyToolError(result.stdout) ?? `Tool exited with code ${result.exitCode}`;
+  }
+  return explicitError;
+}
+
 export function MessageBubble({
   message,
   isGroup,
@@ -305,41 +333,44 @@ export function MessageBubble({
                   opacity: 0.8,
                 }}
               >
-                {message.toolCalls.map((tc: any, i: number) => (
-                  <div
-                    key={i}
-                    style={{
-                      padding: '3px 0',
-                      borderBottom: i < message.toolCalls.length - 1 ? '1px solid rgba(255,255,255,0.1)' : 'none',
-                    }}
-                  >
-                    <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <span>{'🔧'}</span>
-                      <span>{tc.toolName}</span>
-                      {tc.durationMs ? <span style={{ opacity: 0.6, fontWeight: 400 }}>{`${tc.durationMs}ms`}</span> : null}
-                      {tc.error ? <span style={{ color: '#f87171' }}>{'✘'}</span> : <span style={{ color: '#4ade80' }}>{'✔'}</span>}
+                {message.toolCalls.map((tc: any, i: number) => {
+                  const toolError = getToolCallError(tc);
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        padding: '3px 0',
+                        borderBottom: i < message.toolCalls.length - 1 ? '1px solid rgba(255,255,255,0.1)' : 'none',
+                      }}
+                    >
+                      <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span>{'🔧'}</span>
+                        <span>{tc.toolName}</span>
+                        {tc.durationMs ? <span style={{ opacity: 0.6, fontWeight: 400 }}>{`${tc.durationMs}ms`}</span> : null}
+                        {toolError ? <span style={{ color: '#f87171' }}>{'✘'}</span> : <span style={{ color: '#4ade80' }}>{'✔'}</span>}
+                      </div>
+                      <details style={{ marginTop: '2px' }}>
+                        <summary style={{ cursor: 'pointer', opacity: 0.7 }}>Details</summary>
+                        <pre
+                          style={{
+                            fontSize: '9px',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-all',
+                            maxHeight: '100px',
+                            overflow: 'auto',
+                            margin: '2px 0',
+                            padding: '4px',
+                            borderRadius: '4px',
+                            background: 'rgba(0,0,0,0.15)',
+                          }}
+                        >
+                          {`Args: ${JSON.stringify(tc.args, null, 1)}\nResult: ${typeof tc.result === 'string' ? tc.result.slice(0, 500) : JSON.stringify(tc.result, null, 1)?.slice(0, 500)}`}
+                        </pre>
+                        {toolError ? <div style={{ color: '#f87171', marginTop: '2px' }}>{`Error: ${toolError}`}</div> : null}
+                      </details>
                     </div>
-                    <details style={{ marginTop: '2px' }}>
-                      <summary style={{ cursor: 'pointer', opacity: 0.7 }}>Details</summary>
-                      <pre
-                        style={{
-                          fontSize: '9px',
-                          whiteSpace: 'pre-wrap',
-                          wordBreak: 'break-all',
-                          maxHeight: '100px',
-                          overflow: 'auto',
-                          margin: '2px 0',
-                          padding: '4px',
-                          borderRadius: '4px',
-                          background: 'rgba(0,0,0,0.15)',
-                        }}
-                      >
-                        {`Args: ${JSON.stringify(tc.args, null, 1)}\nResult: ${typeof tc.result === 'string' ? tc.result.slice(0, 500) : JSON.stringify(tc.result, null, 1)?.slice(0, 500)}`}
-                      </pre>
-                      {tc.error ? <div style={{ color: '#f87171', marginTop: '2px' }}>{`Error: ${tc.error}`}</div> : null}
-                    </details>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : null}
           </div>

@@ -55,6 +55,55 @@ type StateCallback = {
   onMessageSent?: (chatGuid: string, bbMessage: any, toolCalls?: any[]) => void;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function stringifyToolError(value: unknown): string | undefined {
+  if (typeof value === 'string') return value.trim() || undefined;
+  if (value instanceof Error) return value.message;
+  if (isRecord(value)) {
+    const message = value.message ?? value.error ?? value.stderr;
+    if (typeof message === 'string' && message.trim()) return message.trim();
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return 'Tool execution failed';
+    }
+  }
+  return undefined;
+}
+
+function inferToolResultError(result: unknown): string | undefined {
+  if (!isRecord(result)) return undefined;
+
+  const explicitError = stringifyToolError(result.error);
+  if (result.isError === true) {
+    return explicitError ?? stringifyToolError(result.message) ?? 'Tool returned isError: true';
+  }
+  if (result.success === false || result.ok === false) {
+    return explicitError ?? stringifyToolError(result.message) ?? 'Tool returned an unsuccessful result';
+  }
+  if (typeof result.exitCode === 'number' && result.exitCode !== 0) {
+    return (
+      explicitError ??
+      stringifyToolError(result.stderr) ??
+      stringifyToolError(result.stdout) ??
+      `Tool exited with code ${result.exitCode}`
+    );
+  }
+  return explicitError;
+}
+
+function normalizeToolCalls(toolCalls?: any[]): any[] | undefined {
+  if (!toolCalls) return undefined;
+  return toolCalls.map((toolCall) => {
+    if (!isRecord(toolCall) || toolCall.error) return toolCall;
+    const inferredError = inferToolResultError(toolCall.result);
+    return inferredError ? { ...toolCall, error: inferredError } : toolCall;
+  });
+}
+
 export class AIReplyEngine {
   private agent: AgentAPI;
   private client: BlueBubblesClient;
@@ -130,10 +179,12 @@ export class AIReplyEngine {
 
   private async generateReply(chatGuid: string, options: AgentGenerateOptions): Promise<AgentResult> {
     if (!this.agent.stream) {
-      return this.agent.generate(options);
+      const result = await this.agent.generate(options);
+      return { ...result, toolCalls: normalizeToolCalls(result.toolCalls) };
     }
 
-    return this.generateReplyFromStream(chatGuid, options);
+    const result = await this.generateReplyFromStream(chatGuid, options);
+    return { ...result, toolCalls: normalizeToolCalls(result.toolCalls) };
   }
 
   private async generateReplyFromStream(chatGuid: string, options: AgentGenerateOptions): Promise<AgentResult> {
@@ -170,10 +221,12 @@ export class AIReplyEngine {
       } else if (event.type === 'tool-result' && event.toolCallId) {
         lastEventWasToolResult = true;
         const pending = pendingToolCalls.get(event.toolCallId);
+        const inferredError = inferToolResultError(event.result);
         toolCalls.push({
           toolName: pending?.toolName ?? event.toolName ?? 'unknown',
           args: pending?.args ?? {},
           result: event.result,
+          ...(inferredError ? { error: inferredError } : {}),
           durationMs: pending ? Date.now() - pending.startedAt : undefined,
         });
         pendingToolCalls.delete(event.toolCallId);
@@ -514,6 +567,7 @@ export class AIReplyEngine {
     parts.push(`- For long-running work, you may call send-message with chatGuid "${currentChatGuid}" to send a brief progress/status update before continuing.`);
     parts.push('- Do not use send-message for the final answer to this same incoming message; return final text normally after the needed tools succeed or fail.');
     parts.push('- After any progress update, keep working until you can provide a final completion or blocked message.');
+    parts.push('- Treat tool outputs with isError: true, an error field, success/ok false, or a nonzero exitCode as failures; retry with a valid alternate call when possible.');
 
     if (isGroup && this.config.groupBehavior === 'smart') {
       parts.push('');
