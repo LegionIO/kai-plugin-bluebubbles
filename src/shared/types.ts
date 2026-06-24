@@ -118,6 +118,24 @@ export type ToolCallInfo = {
   durationMs?: number;
 };
 
+export type MessageTextContentPart = {
+  type: 'text';
+  text: string;
+};
+
+export type MessageToolCallContentPart = {
+  type: 'tool-call';
+  toolCallId?: string;
+  toolName: string;
+  args: unknown;
+  result?: unknown;
+  error?: string;
+  durationMs?: number;
+  status: 'running' | 'completed' | 'failed';
+};
+
+export type MessageContentPart = MessageTextContentPart | MessageToolCallContentPart;
+
 export type NormalizedMessage = {
   guid: string;
   chatGuid: string;
@@ -136,8 +154,9 @@ export type NormalizedMessage = {
   isRead: boolean;
   error: number;
   toolCalls?: ToolCallInfo[];
+  contentParts?: MessageContentPart[];
   isLocalOnly?: boolean;
-  localKind?: 'ai-reply-failure';
+  localKind?: 'ai-reply-failure' | 'ai-reply-progress';
 };
 
 export type NormalizedChat = {

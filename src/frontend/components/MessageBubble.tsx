@@ -53,6 +53,16 @@ function getToolCallError(toolCall: any): string | undefined {
   return explicitError;
 }
 
+function formatToolValue(value: any, pendingLabel = 'Pending'): string {
+  if (typeof value === 'undefined') return pendingLabel;
+  if (typeof value === 'string') return value.slice(0, 500);
+  try {
+    return (JSON.stringify(value, null, 1) ?? String(value)).slice(0, 500);
+  } catch {
+    return String(value).slice(0, 500);
+  }
+}
+
 export function MessageBubble({
   message,
   isGroup,
@@ -194,6 +204,108 @@ export function MessageBubble({
     if (r.isFromMe) reactionGroups[r.type].hasFromMe = true;
   }
 
+  const orderedContentParts = Array.isArray(message.contentParts) && message.contentParts.length > 0
+    ? message.contentParts
+    : null;
+  const showToolTrace = Boolean(showToolCalls || isAIReplyFailure);
+  const visibleOrderedContentParts = orderedContentParts?.filter((part: any) => (
+    part.type === 'text'
+      ? Boolean(part.text?.trim())
+      : showToolTrace
+  )) ?? null;
+
+  const renderToolCallTrace = (tc: any, key: React.Key, isLast: boolean) => {
+    const toolError = getToolCallError(tc);
+    const status = tc.status === 'running'
+      ? 'Running'
+      : (toolError ? 'Failed' : 'Done');
+    const statusColor = tc.status === 'running'
+      ? 'rgba(255,255,255,0.72)'
+      : (toolError ? '#f87171' : '#4ade80');
+    const resultPending = tc.status === 'running' && typeof tc.result === 'undefined';
+
+    return (
+      <div
+        key={key}
+        style={{
+          padding: '3px 0',
+          borderBottom: isLast ? 'none' : '1px solid rgba(255,255,255,0.1)',
+          fontSize: '10px',
+          lineHeight: 1.35,
+          opacity: isAIReplyFailure ? 1 : 0.84,
+        }}
+      >
+        <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0 }}>
+          <span>{'🔧'}</span>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{tc.toolName}</span>
+          {tc.durationMs ? <span style={{ opacity: 0.6, fontWeight: 400 }}>{`${tc.durationMs}ms`}</span> : null}
+          <span style={{ color: statusColor, fontWeight: 500 }}>{status}</span>
+        </div>
+        <details style={{ marginTop: '2px' }}>
+          <summary style={{ cursor: 'pointer', opacity: 0.7 }}>Details</summary>
+          <pre
+            style={{
+              fontSize: '9px',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-all',
+              maxHeight: '100px',
+              overflow: 'auto',
+              margin: '2px 0',
+              padding: '4px',
+              borderRadius: '4px',
+              background: 'rgba(0,0,0,0.15)',
+            }}
+          >
+            {`Args: ${formatToolValue(tc.args ?? {}, '{}')}\nResult: ${formatToolValue(tc.result, resultPending ? 'Pending' : 'None')}`}
+          </pre>
+          {toolError ? <div style={{ color: '#f87171', marginTop: '2px' }}>{`Error: ${toolError}`}</div> : null}
+        </details>
+      </div>
+    );
+  };
+
+  const renderMessageContent = () => {
+    if (visibleOrderedContentParts) {
+      if (visibleOrderedContentParts.length > 0) {
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {visibleOrderedContentParts.map((part: any, i: number) => {
+              if (part.type === 'text') {
+                return (
+                  <span key={`text-${i}`} style={{ whiteSpace: 'pre-wrap' }}>
+                    {part.text.trim()}
+                  </span>
+                );
+              }
+              return renderToolCallTrace(part, `tool-${i}`, i === visibleOrderedContentParts.length - 1);
+            })}
+            {message.isEdited ? (
+              <span className="text-[10px] opacity-60">(edited)</span>
+            ) : null}
+          </div>
+        );
+      }
+    }
+
+    return (
+      <span style={{ whiteSpace: 'pre-wrap' }}>
+        {message.text}
+        {message.isEdited ? (
+          <span className="ml-1 text-[10px] opacity-60">(edited)</span>
+        ) : null}
+      </span>
+    );
+  };
+
+  if (
+    message.localKind === 'ai-reply-progress' &&
+    !message.text?.trim() &&
+    !visibleOrderedContentParts?.length &&
+    (message.attachments ?? []).length === 0
+  ) {
+    return null;
+  }
+
   const quickReactBar = hovered && !showMenu && !editing ? (
     <div
       style={{
@@ -302,12 +414,7 @@ export function MessageBubble({
                 </div>
               </div>
             ) : (
-              <span style={{ whiteSpace: 'pre-wrap' }}>
-                {message.text}
-                {message.isEdited ? (
-                  <span className="ml-1 text-[10px] opacity-60">(edited)</span>
-                ) : null}
-              </span>
+              renderMessageContent()
             )}
 
             {/* Attachments */}
@@ -329,7 +436,7 @@ export function MessageBubble({
             ) : null}
 
             {/* Tool calls (when enabled) */}
-            {(showToolCalls || isAIReplyFailure) && message.toolCalls?.length > 0 ? (
+            {!orderedContentParts && showToolTrace && message.toolCalls?.length > 0 ? (
               <div
                 style={{
                   marginTop: '6px',
@@ -339,44 +446,9 @@ export function MessageBubble({
                   opacity: isAIReplyFailure ? 1 : 0.8,
                 }}
               >
-                {message.toolCalls.map((tc: any, i: number) => {
-                  const toolError = getToolCallError(tc);
-                  return (
-                    <div
-                      key={i}
-                      style={{
-                        padding: '3px 0',
-                        borderBottom: i < message.toolCalls.length - 1 ? '1px solid rgba(255,255,255,0.1)' : 'none',
-                      }}
-                    >
-                      <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <span>{'🔧'}</span>
-                        <span>{tc.toolName}</span>
-                        {tc.durationMs ? <span style={{ opacity: 0.6, fontWeight: 400 }}>{`${tc.durationMs}ms`}</span> : null}
-                        {toolError ? <span style={{ color: '#f87171' }}>{'✘'}</span> : <span style={{ color: '#4ade80' }}>{'✔'}</span>}
-                      </div>
-                      <details style={{ marginTop: '2px' }}>
-                        <summary style={{ cursor: 'pointer', opacity: 0.7 }}>Details</summary>
-                        <pre
-                          style={{
-                            fontSize: '9px',
-                            whiteSpace: 'pre-wrap',
-                            wordBreak: 'break-all',
-                            maxHeight: '100px',
-                            overflow: 'auto',
-                            margin: '2px 0',
-                            padding: '4px',
-                            borderRadius: '4px',
-                            background: 'rgba(0,0,0,0.15)',
-                          }}
-                        >
-                          {`Args: ${JSON.stringify(tc.args, null, 1)}\nResult: ${typeof tc.result === 'string' ? tc.result.slice(0, 500) : JSON.stringify(tc.result, null, 1)?.slice(0, 500)}`}
-                        </pre>
-                        {toolError ? <div style={{ color: '#f87171', marginTop: '2px' }}>{`Error: ${toolError}`}</div> : null}
-                      </details>
-                    </div>
-                  );
-                })}
+                {message.toolCalls.map((tc: any, i: number) => (
+                  renderToolCallTrace(tc, i, i >= message.toolCalls.length - 1)
+                ))}
               </div>
             ) : null}
           </div>

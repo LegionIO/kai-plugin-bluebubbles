@@ -6,6 +6,8 @@ import type {
   BBMessage,
   AIReplyConfig,
   ChunkConfig,
+  MessageContentPart,
+  MessageToolCallContentPart,
   NormalizedChat,
   ThreadSettings,
 } from '../shared/types.js';
@@ -37,6 +39,7 @@ type AgentResult = {
   text: string;
   modelKey: string;
   toolCalls?: any[];
+  contentParts?: MessageContentPart[];
   historyText?: string;
 };
 
@@ -53,13 +56,24 @@ type LogAPI = {
 
 type StateCallback = {
   setAIReplyProcessing: (chatGuid: string, processing: boolean) => void;
-  onMessageSent?: (chatGuid: string, bbMessage: any, toolCalls?: any[]) => void;
+  onMessageSent?: (chatGuid: string, bbMessage: any, trace?: {
+    toolCalls?: any[];
+    contentParts?: MessageContentPart[];
+    replaceMessageGuid?: string;
+  }) => void;
+  onAIReplyProgress?: (chatGuid: string, progress: {
+    guid: string;
+    text: string;
+    contentParts: MessageContentPart[];
+    toolCalls?: any[];
+  }) => void;
   onAIReplyFailed?: (chatGuid: string, failure: {
     text: string;
     error: string;
     stage: string;
     runId: string;
     toolCalls?: any[];
+    contentParts?: MessageContentPart[];
   }) => void;
 };
 
@@ -69,6 +83,7 @@ class AIReplyGenerationError extends Error {
   historyText: string;
   modelKey: string;
   toolCalls: any[];
+  contentParts: MessageContentPart[];
   cause?: unknown;
 
   constructor(
@@ -79,6 +94,7 @@ class AIReplyGenerationError extends Error {
       historyText?: string;
       modelKey?: string;
       toolCalls?: any[];
+      contentParts?: MessageContentPart[];
       cause?: unknown;
     } = {},
   ) {
@@ -89,9 +105,12 @@ class AIReplyGenerationError extends Error {
     this.historyText = options.historyText ?? '';
     this.modelKey = options.modelKey ?? '';
     this.toolCalls = options.toolCalls ?? [];
+    this.contentParts = options.contentParts ?? [];
     this.cause = options.cause;
   }
 }
+
+const TEXT_CONTENT_PART_SEPARATOR = '\n\n';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -155,6 +174,51 @@ function normalizeToolCalls(toolCalls?: any[]): any[] | undefined {
     const inferredError = inferToolResultError(toolCall.result);
     return inferredError ? { ...toolCall, error: inferredError } : toolCall;
   });
+}
+
+function cloneContentParts(parts: MessageContentPart[]): MessageContentPart[] {
+  return parts.map((part) => ({ ...part }));
+}
+
+function mapTextContentParts(
+  parts: MessageContentPart[] | undefined,
+  mapText: (text: string) => string,
+): MessageContentPart[] | undefined {
+  if (!parts) return undefined;
+  return parts.map((part) => (
+    part.type === 'text'
+      ? { ...part, text: mapText(part.text) }
+      : { ...part }
+  ));
+}
+
+function joinTextContentParts(parts: MessageContentPart[]): string {
+  return parts
+    .filter((part): part is Extract<MessageContentPart, { type: 'text' }> => part.type === 'text')
+    .map((part) => part.text.trim())
+    .filter(Boolean)
+    .join(TEXT_CONTENT_PART_SEPARATOR);
+}
+
+function buildFallbackContentParts(text: string, toolCalls?: any[]): MessageContentPart[] | undefined {
+  if (!text.trim() && !toolCalls?.length) return undefined;
+  const parts: MessageContentPart[] = [];
+  if (text.trim()) {
+    parts.push({ type: 'text', text });
+  }
+  for (const toolCall of toolCalls ?? []) {
+    const inferredError = toolCall.error ?? inferToolResultError(toolCall.result);
+    parts.push({
+      type: 'tool-call',
+      toolName: toolCall.toolName ?? 'unknown',
+      args: toolCall.args ?? {},
+      result: toolCall.result,
+      ...(inferredError ? { error: inferredError } : {}),
+      durationMs: toolCall.durationMs,
+      status: inferredError ? 'failed' : 'completed',
+    });
+  }
+  return parts;
 }
 
 export class AIReplyEngine {
@@ -256,6 +320,7 @@ export class AIReplyEngine {
     error: string;
     runId: string;
     toolCalls?: any[];
+    contentParts?: MessageContentPart[];
     partialText?: string;
     generatedText?: string;
   }): void {
@@ -266,6 +331,7 @@ export class AIReplyEngine {
       stage: failure.stage,
       runId: failure.runId,
       toolCalls: failure.toolCalls,
+      contentParts: failure.contentParts,
     });
   }
 
@@ -287,7 +353,12 @@ export class AIReplyEngine {
     );
   }
 
-  private async sendTextChunks(chatGuid: string, text: string, toolCalls?: any[], runId?: string): Promise<void> {
+  private async sendTextChunks(
+    chatGuid: string,
+    text: string,
+    trace?: { toolCalls?: any[]; contentParts?: MessageContentPart[]; replaceMessageGuid?: string },
+    runId?: string,
+  ): Promise<void> {
     const chunks = chunkText(text, this.chunkConfig);
     if (chunks.length === 0) {
       if (runId) this.debugEvent(runId, 'ai_reply.send.skipped_empty_chunks', { chatGuid });
@@ -300,7 +371,7 @@ export class AIReplyEngine {
         chatGuid,
         chunkCount: chunks.length,
         totalLength: text.length,
-        firstChunkHasToolCalls: Boolean(toolCalls?.length),
+        firstChunkHasToolCalls: Boolean(trace?.toolCalls?.length),
       }, 'info');
     }
 
@@ -315,15 +386,21 @@ export class AIReplyEngine {
           messageGuid: sentMsg.guid,
         }, 'info');
       }
-      this.stateCallback.onMessageSent?.(chatGuid, sentMsg, i === 0 ? toolCalls : undefined);
+      this.stateCallback.onMessageSent?.(chatGuid, sentMsg, i === 0 ? trace : undefined);
     }
   }
 
-  private async generateReply(chatGuid: string, options: AgentGenerateOptions, runId: string): Promise<AgentResult> {
+  private async generateReply(
+    chatGuid: string,
+    options: AgentGenerateOptions,
+    runId: string,
+    liveMessageGuid: string,
+  ): Promise<AgentResult> {
     if (!this.agent.stream) {
       try {
         const result = await this.agent.generate(options);
         const normalizedToolCalls = normalizeToolCalls(result.toolCalls);
+        const contentParts = buildFallbackContentParts(result.text, normalizedToolCalls);
         this.debugEvent(runId, 'ai_reply.generate.completed', {
           chatGuid,
           modelKey: result.modelKey,
@@ -331,53 +408,108 @@ export class AIReplyEngine {
           toolCallCount: normalizedToolCalls?.length ?? 0,
           toolCalls: normalizedToolCalls,
         }, 'info');
-        return { ...result, toolCalls: normalizedToolCalls };
+        return { ...result, toolCalls: normalizedToolCalls, contentParts };
       } catch (err) {
         throw new AIReplyGenerationError(errorToString(err), { cause: err });
       }
     }
 
-    const result = await this.generateReplyFromStream(chatGuid, options, runId);
+    const result = await this.generateReplyFromStream(chatGuid, options, runId, liveMessageGuid);
     return { ...result, toolCalls: normalizeToolCalls(result.toolCalls) };
   }
 
-  private async generateReplyFromStream(chatGuid: string, options: AgentGenerateOptions, runId: string): Promise<AgentResult> {
+  private async generateReplyFromStream(
+    chatGuid: string,
+    options: AgentGenerateOptions,
+    runId: string,
+    liveMessageGuid: string,
+  ): Promise<AgentResult> {
     let pendingText = '';
     let historyText = '';
     let modelKey = '';
     let error: string | null = null;
-    let lastEventWasToolResult = false;
     const toolCalls: any[] = [];
-    const pendingToolCalls = new Map<string, { toolName: string; args: unknown; startedAt: number }>();
-    const setBlockedText = (message: string) => {
-      pendingText = message;
-      if (historyText.trim()) {
-        historyText += `\n\n${message}`;
+    const contentParts: MessageContentPart[] = [];
+    const pendingToolCalls = new Map<string, {
+      toolName: string;
+      args: unknown;
+      startedAt: number;
+      partIndex: number;
+    }>();
+
+    const refreshText = () => {
+      const joinedText = joinTextContentParts(contentParts);
+      pendingText = joinedText;
+      historyText = joinedText;
+    };
+
+    const publishProgress = () => {
+      refreshText();
+      if (contentParts.length === 0) return;
+      this.stateCallback.onAIReplyProgress?.(chatGuid, {
+        guid: liveMessageGuid,
+        text: pendingText,
+        contentParts: cloneContentParts(contentParts),
+        toolCalls: normalizeToolCalls(toolCalls) ?? [],
+      });
+    };
+
+    const appendTextDelta = (text: string) => {
+      const lastPart = contentParts[contentParts.length - 1];
+      if (lastPart?.type === 'text') {
+        lastPart.text += text;
       } else {
-        historyText = message;
+        contentParts.push({ type: 'text', text });
+      }
+      publishProgress();
+    };
+
+    const appendBlockedText = (message: string) => {
+      const lastPart = contentParts[contentParts.length - 1];
+      if (lastPart?.type === 'text') {
+        lastPart.text = lastPart.text.trim()
+          ? `${lastPart.text.trimEnd()}${TEXT_CONTENT_PART_SEPARATOR}${message}`
+          : message;
+      } else {
+        contentParts.push({ type: 'text', text: message });
+      }
+      publishProgress();
+    };
+
+    const setToolPart = (toolCallId: string, part: MessageToolCallContentPart) => {
+      const pending = pendingToolCalls.get(toolCallId);
+      if (pending && contentParts[pending.partIndex]?.type === 'tool-call') {
+        contentParts[pending.partIndex] = part;
+      } else {
+        contentParts.push(part);
       }
     };
 
     try {
       for await (const event of this.agent.stream!(options)) {
         if (event.type === 'text-delta' && event.text) {
-          if (lastEventWasToolResult && historyText.length > 0 && !historyText.endsWith('\n')) {
-            historyText += '\n\n';
-          }
-          pendingText += event.text;
-          historyText += event.text;
-          lastEventWasToolResult = false;
+          appendTextDelta(event.text);
           this.debugEvent(runId, 'ai_reply.stream.text_delta', {
             chatGuid,
             length: event.text.length,
             text: event.text,
           });
         } else if (event.type === 'tool-call' && event.toolCallId) {
-          pendingToolCalls.set(event.toolCallId, {
+          const toolPart: MessageToolCallContentPart = {
+            type: 'tool-call',
+            toolCallId: event.toolCallId,
             toolName: event.toolName ?? 'unknown',
-            args: event.args,
+            args: event.args ?? {},
+            status: 'running',
+          };
+          contentParts.push(toolPart);
+          pendingToolCalls.set(event.toolCallId, {
+            toolName: toolPart.toolName,
+            args: toolPart.args,
             startedAt: Date.now(),
+            partIndex: contentParts.length - 1,
           });
+          publishProgress();
           this.debugEvent(runId, 'ai_reply.stream.tool_call', {
             chatGuid,
             toolCallId: event.toolCallId,
@@ -385,7 +517,6 @@ export class AIReplyEngine {
             args: event.args,
           }, 'info');
         } else if (event.type === 'tool-result' && event.toolCallId) {
-          lastEventWasToolResult = true;
           const pending = pendingToolCalls.get(event.toolCallId);
           const inferredError = inferToolResultError(event.result);
           const toolCall = {
@@ -396,7 +527,14 @@ export class AIReplyEngine {
             durationMs: pending ? Date.now() - pending.startedAt : undefined,
           };
           toolCalls.push(toolCall);
+          setToolPart(event.toolCallId, {
+            type: 'tool-call',
+            toolCallId: event.toolCallId,
+            ...toolCall,
+            status: inferredError ? 'failed' : 'completed',
+          });
           pendingToolCalls.delete(event.toolCallId);
+          publishProgress();
           this.debugEvent(runId, 'ai_reply.stream.tool_result', {
             chatGuid,
             toolCallId: event.toolCallId,
@@ -412,14 +550,21 @@ export class AIReplyEngine {
             durationMs: pending ? Date.now() - pending.startedAt : undefined,
           };
           toolCalls.push(toolCall);
+          setToolPart(event.toolCallId, {
+            type: 'tool-call',
+            toolCallId: event.toolCallId,
+            ...toolCall,
+            status: 'failed',
+          });
           pendingToolCalls.delete(event.toolCallId);
+          publishProgress();
           this.debugEvent(runId, 'ai_reply.stream.tool_error', {
             chatGuid,
             toolCallId: event.toolCallId,
             ...toolCall,
           }, 'warn');
         } else if (event.type === 'max-steps-reached') {
-          setBlockedText("I hit my tool-step limit before I could finish that, so I can't confirm it completed.");
+          appendBlockedText("I hit my tool-step limit before I could finish that, so I can't confirm it completed.");
           this.debugEvent(runId, 'ai_reply.stream.max_steps_reached', { chatGuid }, 'warn');
         } else if (event.type === 'error') {
           error = event.error ?? 'Unknown error';
@@ -448,6 +593,7 @@ export class AIReplyEngine {
         partialText: pendingText,
         historyText,
         toolCalls,
+        contentParts,
         pendingToolCalls: [...pendingToolCalls.entries()].map(([toolCallId, pending]) => ({
           toolCallId,
           toolName: pending.toolName,
@@ -460,17 +606,26 @@ export class AIReplyEngine {
         historyText: historyText.trim(),
         modelKey,
         toolCalls: normalizeToolCalls(toolCalls) ?? [],
+        contentParts: cloneContentParts(contentParts),
         cause: err,
       });
     }
 
+    let missingToolResult = false;
     for (const [toolCallId, pending] of pendingToolCalls.entries()) {
-      toolCalls.push({
+      const toolCall = {
         toolName: pending.toolName,
         args: pending.args ?? {},
         result: null,
         error: 'Tool call ended without a result.',
         durationMs: Date.now() - pending.startedAt,
+      };
+      toolCalls.push(toolCall);
+      setToolPart(toolCallId, {
+        type: 'tool-call',
+        toolCallId,
+        ...toolCall,
+        status: 'failed',
       });
       this.debugEvent(runId, 'ai_reply.stream.tool_missing_result', {
         chatGuid,
@@ -480,10 +635,14 @@ export class AIReplyEngine {
         durationMs: Date.now() - pending.startedAt,
       }, 'warn');
       pendingToolCalls.delete(toolCallId);
+      missingToolResult = true;
     }
-    if (toolCalls.some((toolCall) => toolCall.error === 'Tool call ended without a result.')) {
-      setBlockedText("A tool call ended before returning a result, so I can't confirm it completed.");
+    if (missingToolResult) {
+      appendBlockedText("A tool call ended before returning a result, so I can't confirm it completed.");
     }
+
+    refreshText();
+    if (contentParts.length > 0) publishProgress();
 
     if (error && !historyText.trim()) {
       throw new AIReplyGenerationError(error, {
@@ -491,6 +650,7 @@ export class AIReplyEngine {
         historyText: historyText.trim(),
         modelKey,
         toolCalls: normalizeToolCalls(toolCalls) ?? [],
+        contentParts: cloneContentParts(contentParts),
       });
     }
 
@@ -498,6 +658,7 @@ export class AIReplyEngine {
       text: pendingText.trim(),
       modelKey,
       toolCalls,
+      contentParts: cloneContentParts(contentParts),
       historyText: historyText.trim(),
     };
     this.debugEvent(runId, 'ai_reply.stream.completed', {
@@ -507,6 +668,7 @@ export class AIReplyEngine {
       historyTextLength: result.historyText.length,
       toolCallCount: toolCalls.length,
       toolCalls,
+      contentParts,
     }, 'info');
     return result;
   }
@@ -538,6 +700,7 @@ export class AIReplyEngine {
     }
 
     const runId = this.makeRunId(chatGuid, msg.guid);
+    const liveMessageGuid = `local-ai-reply-progress-${runId}`;
 
     const isGroup = chatGuid.includes(';+;');
     const senderAddress = msg.handle?.address ?? '';
@@ -753,14 +916,29 @@ export class AIReplyEngine {
         reasoningEffort: threadSettings?.reasoningEffort ?? this.config.reasoningEffort,
         fallbackEnabled: threadSettings?.fallbackEnabled ?? this.config.fallbackEnabled,
         tools: true,
-      }, runId);
+      }, runId, liveMessageGuid);
 
       let responseText = result.text.trim();
       const historyText = (result.historyText ?? result.text).trim();
+      let displayContentParts = result.contentParts ? cloneContentParts(result.contentParts) : undefined;
+      const updateLiveTrace = () => {
+        if (!displayContentParts?.length) return;
+        this.stateCallback.onAIReplyProgress?.(chatGuid, {
+          guid: liveMessageGuid,
+          text: joinTextContentParts(displayContentParts),
+          contentParts: displayContentParts,
+          toolCalls: result?.toolCalls,
+        });
+      };
       historyTextForFailure = historyText;
       responseTextForFailure = responseText;
 
       if (!responseText || responseText === '[NO_REPLY]' || responseText.includes('[NO_REPLY]')) {
+        displayContentParts = mapTextContentParts(
+          displayContentParts,
+          (text) => text.replace(/\[NO_REPLY\]/g, ''),
+        );
+        updateLiveTrace();
         if (historyText && !historyText.includes('[NO_REPLY]')) {
           this.history.appendMessage(chatGuid, {
             role: 'assistant',
@@ -787,6 +965,10 @@ export class AIReplyEngine {
         reactions.push(reactMatch[1].toLowerCase());
       }
       responseText = responseText.replace(reactPattern, '').trim();
+      displayContentParts = mapTextContentParts(
+        displayContentParts,
+        (text) => text.replace(/\[REACT:\w+\]/gi, ''),
+      );
 
       // Send reactions to the last received message
       if (reactions.length > 0 && msg.guid) {
@@ -816,6 +998,7 @@ export class AIReplyEngine {
 
       // If only reactions and no text remaining, we're done
       if (!responseText || responseText === '[NO_REPLY]') {
+        updateLiveTrace();
         if (historyText) {
           this.history.appendMessage(chatGuid, {
             role: 'assistant',
@@ -921,11 +1104,16 @@ export class AIReplyEngine {
 
         // Strip markdown image syntax from text
         responseText = responseText.replace(mediaPattern, '').trim();
+        displayContentParts = mapTextContentParts(
+          displayContentParts,
+          (text) => text.replace(mediaPattern, ''),
+        );
         responseTextForFailure = responseText;
       }
 
       // If only media was sent and no text remains, we're done
       if (!responseText || responseText === '[NO_REPLY]') {
+        updateLiveTrace();
         this.recentReplies.set(chatGuid, Date.now());
         this.history.appendMessage(chatGuid, {
           role: 'assistant',
@@ -943,7 +1131,11 @@ export class AIReplyEngine {
       // Chunk and send text
       failureStage = 'sending final reply';
       responseTextForFailure = responseText;
-      await this.sendTextChunks(chatGuid, responseText, result.toolCalls, runId);
+      await this.sendTextChunks(chatGuid, responseText, {
+        toolCalls: result.toolCalls,
+        contentParts: displayContentParts,
+        replaceMessageGuid: liveMessageGuid,
+      }, runId);
 
       // Record in history
       this.history.appendMessage(chatGuid, {
@@ -967,6 +1159,9 @@ export class AIReplyEngine {
       const toolCalls = generationError?.toolCalls?.length
         ? generationError.toolCalls
         : result?.toolCalls;
+      const contentParts = generationError?.contentParts?.length
+        ? generationError.contentParts
+        : result?.contentParts;
       const partialText = generationError?.partialText || generationError?.historyText || historyTextForFailure;
       const generatedText = stage.toLowerCase().includes('send') ? responseTextForFailure : undefined;
 
@@ -979,12 +1174,14 @@ export class AIReplyEngine {
         generatedText,
         result,
         toolCalls,
+        contentParts,
       }, 'error');
       this.publishFailureMessage(chatGuid, {
         stage,
         error,
         runId,
         toolCalls,
+        contentParts,
         partialText,
         generatedText,
       });

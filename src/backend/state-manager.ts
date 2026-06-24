@@ -184,6 +184,40 @@ export class StateManager {
     }
   }
 
+  upsertActiveChatMessage(message: NormalizedMessage): void {
+    if (message.chatGuid !== this.state.activeChatGuid) return;
+
+    const idx = this.state.activeChatMessages.findIndex((m) => m.guid === message.guid);
+    if (idx >= 0) {
+      this.state.activeChatMessages[idx] = message;
+    } else {
+      this.state.activeChatMessages = [...this.state.activeChatMessages, message];
+    }
+    this.state.activeChatMessages = [...this.state.activeChatMessages];
+    this.stateApi.set('activeChatMessages', this.state.activeChatMessages);
+  }
+
+  replaceActiveChatMessage(oldGuid: string, message: NormalizedMessage): void {
+    if (message.chatGuid === this.state.activeChatGuid) {
+      const oldIdx = this.state.activeChatMessages.findIndex((m) => m.guid === oldGuid);
+      const newIdx = this.state.activeChatMessages.findIndex((m) => m.guid === message.guid);
+      if (oldIdx >= 0) {
+        this.state.activeChatMessages[oldIdx] = message;
+        if (newIdx >= 0 && newIdx !== oldIdx) {
+          this.state.activeChatMessages.splice(newIdx, 1);
+        }
+      } else if (newIdx >= 0) {
+        this.state.activeChatMessages[newIdx] = message;
+      } else {
+        this.state.activeChatMessages = [...this.state.activeChatMessages, message];
+      }
+      this.state.activeChatMessages = [...this.state.activeChatMessages];
+      this.stateApi.set('activeChatMessages', this.state.activeChatMessages);
+    }
+
+    this.updateChatWithMessage(message);
+  }
+
   setTypingIndicator(chatGuid: string, isTyping: boolean): void {
     this.state.typingIndicators = {
       ...this.state.typingIndicators,

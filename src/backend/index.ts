@@ -22,7 +22,13 @@ import {
   DEFAULT_AI_SYSTEM_PROMPT,
   DEFAULT_MAX_HISTORY_PER_CHAT,
 } from '../shared/constants.js';
-import type { BlueBubblesPluginConfig, AIReplyConfig, ChunkConfig, NormalizedMessage } from '../shared/types.js';
+import type {
+  BlueBubblesPluginConfig,
+  AIReplyConfig,
+  ChunkConfig,
+  MessageContentPart,
+  NormalizedMessage,
+} from '../shared/types.js';
 
 type PluginAPI = {
   pluginName: string;
@@ -130,6 +136,7 @@ let debugLog: AdvancedDebugLogger | null = null;
 let webhookStarted = false;
 let unsubConfig: (() => void) | null = null;
 let toolCallStore: Record<string, any[]> = {}; // messageGuid -> toolCalls
+let messageContentPartStore: Record<string, MessageContentPart[]> = {}; // messageGuid -> ordered assistant content/tool parts
 let localMessageStore: Record<string, NormalizedMessage[]> = {}; // chatGuid -> local-only messages
 
 const MAX_LOCAL_MESSAGES_PER_CHAT = 50;
@@ -184,10 +191,17 @@ function isConfigured(config: BlueBubblesPluginConfig): boolean {
 
 function createLocalAIReplyFailureMessage(
   chatGuid: string,
-  failure: { text: string; error: string; stage: string; runId: string; toolCalls?: any[] },
+  failure: {
+    text: string;
+    error: string;
+    stage: string;
+    runId: string;
+    toolCalls?: any[];
+    contentParts?: MessageContentPart[];
+  },
 ): NormalizedMessage {
   return {
-    guid: `local-ai-reply-failure-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    guid: `local-ai-reply-progress-${failure.runId}`,
     chatGuid,
     sender: 'me',
     senderName: 'Me',
@@ -204,15 +218,50 @@ function createLocalAIReplyFailureMessage(
     isRead: false,
     error: 1,
     toolCalls: failure.toolCalls,
+    contentParts: failure.contentParts,
     isLocalOnly: true,
     localKind: 'ai-reply-failure',
   };
 }
 
+function createLocalAIReplyProgressMessage(
+  chatGuid: string,
+  progress: {
+    guid: string;
+    text: string;
+    contentParts: MessageContentPart[];
+    toolCalls?: any[];
+  },
+): NormalizedMessage {
+  return {
+    guid: progress.guid,
+    chatGuid,
+    sender: 'me',
+    senderName: 'Me',
+    text: progress.text,
+    date: Date.now(),
+    isFromMe: true,
+    attachments: [],
+    reactions: [],
+    replyToGuid: null,
+    isEdited: false,
+    isUnsent: false,
+    effectId: null,
+    isDelivered: false,
+    isRead: false,
+    error: 0,
+    toolCalls: progress.toolCalls,
+    contentParts: progress.contentParts,
+    isLocalOnly: true,
+    localKind: 'ai-reply-progress',
+  };
+}
+
 function storeLocalMessage(api: PluginAPI, message: NormalizedMessage): void {
   const existing = localMessageStore[message.chatGuid] ?? [];
-  localMessageStore[message.chatGuid] = [...existing, message]
-    .slice(-MAX_LOCAL_MESSAGES_PER_CHAT);
+  const byGuid = new Map(existing.map((msg) => [msg.guid, msg]));
+  byGuid.set(message.guid, message);
+  localMessageStore[message.chatGuid] = [...byGuid.values()].slice(-MAX_LOCAL_MESSAGES_PER_CHAT);
   api.config.setPluginData('localMessageStore', localMessageStore);
 }
 
@@ -477,7 +526,7 @@ async function startWebhook(api: PluginAPI, config: BlueBubblesPluginConfig): Pr
     debugLog: debugLog ?? undefined,
     stateCallback: {
       setAIReplyProcessing: (chatGuid, processing) => stateManager!.setAIReplyProcessing(chatGuid, processing),
-      onMessageSent: (chatGuid, bbMessage, toolCalls) => {
+      onMessageSent: (chatGuid, bbMessage, trace) => {
         if (stateManager && client) {
           const normalized = normalizeMessage(
             bbMessage,
@@ -485,25 +534,49 @@ async function startWebhook(api: PluginAPI, config: BlueBubblesPluginConfig): Pr
             (guid) => client!.getAttachmentUrl(guid),
             (addr) => contacts!.resolve(addr),
           );
-          if (toolCalls?.length) {
-            normalized.toolCalls = toolCalls;
-            toolCallStore[normalized.guid] = toolCalls;
+          if (trace?.toolCalls?.length) {
+            normalized.toolCalls = trace.toolCalls;
+            toolCallStore[normalized.guid] = trace.toolCalls;
             api.config.setPluginData('toolCallStore', toolCallStore);
           }
-          stateManager.addIncomingMessage(normalized);
+          if (trace?.contentParts?.length) {
+            normalized.contentParts = trace.contentParts;
+            messageContentPartStore[normalized.guid] = trace.contentParts;
+            api.config.setPluginData('messageContentPartStore', messageContentPartStore);
+          }
+          if (trace?.replaceMessageGuid) {
+            stateManager.replaceActiveChatMessage(trace.replaceMessageGuid, normalized);
+          } else {
+            stateManager.addIncomingMessage(normalized);
+          }
           debugLog?.event('message.sent_to_ui', {
             chatGuid,
             messageGuid: normalized.guid,
             text: normalized.text,
-            toolCallCount: toolCalls?.length ?? 0,
+            toolCallCount: trace?.toolCalls?.length ?? 0,
+            contentPartCount: trace?.contentParts?.length ?? 0,
+            replacedMessageGuid: trace?.replaceMessageGuid,
           }, 'info');
+        }
+      },
+      onAIReplyProgress: (chatGuid, progress) => {
+        if (stateManager) {
+          const localMessage = createLocalAIReplyProgressMessage(chatGuid, progress);
+          stateManager.upsertActiveChatMessage(localMessage);
+          debugLog?.event('ai_reply.progress_message_updated', {
+            chatGuid,
+            localMessageGuid: localMessage.guid,
+            textLength: localMessage.text.length,
+            toolCallCount: progress.toolCalls?.length ?? 0,
+            contentPartCount: progress.contentParts.length,
+          });
         }
       },
       onAIReplyFailed: (chatGuid, failure) => {
         if (stateManager) {
           const localMessage = createLocalAIReplyFailureMessage(chatGuid, failure);
           storeLocalMessage(api, localMessage);
-          stateManager.addIncomingMessage(localMessage);
+          stateManager.replaceActiveChatMessage(localMessage.guid, localMessage);
           debugLog?.event('ai_reply.failure_message_added_to_thread', {
             chatGuid,
             localMessageGuid: localMessage.guid,
@@ -511,6 +584,7 @@ async function startWebhook(api: PluginAPI, config: BlueBubblesPluginConfig): Pr
             stage: failure.stage,
             error: failure.error,
             toolCallCount: failure.toolCalls?.length ?? 0,
+            contentPartCount: failure.contentParts?.length ?? 0,
           }, 'info');
         }
       },
@@ -572,6 +646,9 @@ async function handlePanelAction(api: PluginAPI, action: string, data?: unknown)
         for (const msg of messages) {
           if (toolCallStore[msg.guid]) {
             msg.toolCalls = toolCallStore[msg.guid];
+          }
+          if (messageContentPartStore[msg.guid]) {
+            msg.contentParts = messageContentPartStore[msg.guid];
           }
         }
         messages = mergeLocalMessages(chatGuid, messages);
@@ -650,6 +727,7 @@ async function handlePanelAction(api: PluginAPI, action: string, data?: unknown)
         let merged = [...byGuid.values()].sort((a, b) => a.date - b.date);
         for (const msg of merged) {
           if (toolCallStore[msg.guid]) msg.toolCalls = toolCallStore[msg.guid];
+          if (messageContentPartStore[msg.guid]) msg.contentParts = messageContentPartStore[msg.guid];
         }
         merged = mergeLocalMessages(chatGuid, merged);
         stateManager.setActiveChatMessages(merged);
@@ -1000,6 +1078,7 @@ export async function activate(api: PluginAPI): Promise<void> {
   iMessageNicknameCache = new IMessageNicknameCache(api.log);
   chatHistory = new ChatHistoryManager(api.config);
   toolCallStore = (api.config.getPluginData().toolCallStore as Record<string, any[]>) ?? {};
+  messageContentPartStore = (api.config.getPluginData().messageContentPartStore as Record<string, MessageContentPart[]>) ?? {};
   localMessageStore = (api.config.getPluginData().localMessageStore as Record<string, NormalizedMessage[]>) ?? {};
 
   stateManager = new StateManager(
@@ -1109,5 +1188,8 @@ export async function deactivate(): Promise<void> {
   chatHistory = null;
   secrets = null;
   debugLog = null;
+  toolCallStore = {};
+  messageContentPartStore = {};
+  localMessageStore = {};
   webhookStarted = false;
 }
