@@ -136,6 +136,8 @@ export type NormalizedMessage = {
   isRead: boolean;
   error: number;
   toolCalls?: ToolCallInfo[];
+  isLocalOnly?: boolean;
+  localKind?: 'ai-reply-failure';
 };
 
 export type NormalizedChat = {
@@ -225,6 +227,7 @@ export type BlueBubblesPluginConfig = {
   webhookHost?: string;
   webhookSecret?: string;
   notifications?: boolean;
+  advancedDebugLogs?: boolean;
   aiReply?: AIReplyConfig;
   chunking?: ChunkConfig;
   contacts?: Record<string, string>;

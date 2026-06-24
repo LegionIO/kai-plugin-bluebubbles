@@ -76,6 +76,7 @@ export function MessageBubble({
   const menuRef = useRef<HTMLDivElement>(null);
 
   const isMe = message.isFromMe;
+  const isAIReplyFailure = message.localKind === 'ai-reply-failure';
 
   if (message.isUnsent) {
     return (
@@ -90,6 +91,11 @@ export function MessageBubble({
   const sentBubbleStyle = {
     backgroundColor: '#3b82f6',
     color: '#ffffff',
+  };
+  const localFailureBubbleStyle = {
+    backgroundColor: 'rgba(239,68,68,0.12)',
+    color: 'var(--color-foreground, #1f2937)',
+    border: '1px solid rgba(239,68,68,0.35)',
   };
   const receivedBubbleStyle = {
     backgroundColor: 'var(--color-muted, #e5e7eb)',
@@ -266,7 +272,7 @@ export function MessageBubble({
           <div
             onContextMenu={handleContextMenu}
             className={`relative ${borderRadius} px-3 py-2 text-sm break-words overflow-hidden cursor-default`}
-            style={{ ...(isMe ? sentBubbleStyle : receivedBubbleStyle), wordBreak: 'break-word', overflowWrap: 'anywhere' }}
+            style={{ ...(isAIReplyFailure ? localFailureBubbleStyle : (isMe ? sentBubbleStyle : receivedBubbleStyle)), wordBreak: 'break-word', overflowWrap: 'anywhere' }}
           >
             {/* Editing mode */}
             {editing ? (
@@ -323,14 +329,14 @@ export function MessageBubble({
             ) : null}
 
             {/* Tool calls (when enabled) */}
-            {showToolCalls && message.toolCalls?.length > 0 ? (
+            {(showToolCalls || isAIReplyFailure) && message.toolCalls?.length > 0 ? (
               <div
                 style={{
                   marginTop: '6px',
-                  borderTop: '1px solid rgba(255,255,255,0.2)',
+                  borderTop: isAIReplyFailure ? '1px solid rgba(239,68,68,0.25)' : '1px solid rgba(255,255,255,0.2)',
                   paddingTop: '4px',
                   fontSize: '10px',
-                  opacity: 0.8,
+                  opacity: isAIReplyFailure ? 1 : 0.8,
                 }}
               >
                 {message.toolCalls.map((tc: any, i: number) => {
@@ -406,7 +412,9 @@ export function MessageBubble({
         {!grouped ? (
           <div className={`flex items-center gap-1 mt-0.5 ${isMe ? 'mr-2 justify-end' : 'ml-2'} text-[10px] text-muted-foreground/50`}>
             <span>{time}</span>
-            {isMe && message.error ? (
+            {isAIReplyFailure ? (
+              <span className="text-red-400">Local failure</span>
+            ) : isMe && message.error ? (
               <span className="text-red-400">Failed</span>
             ) : isMe && message.isRead ? (
               <span>Read</span>

@@ -11,6 +11,7 @@ import { normalizeChat, normalizeMessage } from './message-normalizer.js';
 import { processMessagesWithReactions } from './reaction-utils.js';
 import { buildBlueBubblesTools } from './tools.js';
 import { SecretStore } from './secret-store.js';
+import { AdvancedDebugLogger } from './debug-logger.js';
 import {
   PANEL_ID,
   NAV_ID,
@@ -125,9 +126,13 @@ let contactPhotoCache: ContactPhotoCache | null = null;
 let iMessageNicknameCache: IMessageNicknameCache | null = null;
 let chatHistory: ChatHistoryManager | null = null;
 let secrets: SecretStore | null = null;
+let debugLog: AdvancedDebugLogger | null = null;
 let webhookStarted = false;
 let unsubConfig: (() => void) | null = null;
 let toolCallStore: Record<string, any[]> = {}; // messageGuid -> toolCalls
+let localMessageStore: Record<string, NormalizedMessage[]> = {}; // chatGuid -> local-only messages
+
+const MAX_LOCAL_MESSAGES_PER_CHAT = 50;
 
 function showFdaBanner(api: PluginAPI): void {
   api.ui.showBanner({
@@ -175,6 +180,67 @@ function getChunkConfig(config: BlueBubblesPluginConfig): ChunkConfig {
 
 function isConfigured(config: BlueBubblesPluginConfig): boolean {
   return Boolean(config.serverUrl && config.password);
+}
+
+function createLocalAIReplyFailureMessage(
+  chatGuid: string,
+  failure: { text: string; error: string; stage: string; runId: string; toolCalls?: any[] },
+): NormalizedMessage {
+  return {
+    guid: `local-ai-reply-failure-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    chatGuid,
+    sender: 'me',
+    senderName: 'Me',
+    text: failure.text,
+    date: Date.now(),
+    isFromMe: true,
+    attachments: [],
+    reactions: [],
+    replyToGuid: null,
+    isEdited: false,
+    isUnsent: false,
+    effectId: null,
+    isDelivered: false,
+    isRead: false,
+    error: 1,
+    toolCalls: failure.toolCalls,
+    isLocalOnly: true,
+    localKind: 'ai-reply-failure',
+  };
+}
+
+function storeLocalMessage(api: PluginAPI, message: NormalizedMessage): void {
+  const existing = localMessageStore[message.chatGuid] ?? [];
+  localMessageStore[message.chatGuid] = [...existing, message]
+    .slice(-MAX_LOCAL_MESSAGES_PER_CHAT);
+  api.config.setPluginData('localMessageStore', localMessageStore);
+}
+
+function mergeLocalMessages(chatGuid: string, messages: NormalizedMessage[]): NormalizedMessage[] {
+  const localMessages = localMessageStore[chatGuid] ?? [];
+  if (localMessages.length === 0) return messages;
+
+  const byGuid = new Map<string, NormalizedMessage>();
+  for (const message of [...messages, ...localMessages]) {
+    byGuid.set(message.guid, message);
+  }
+  return [...byGuid.values()].sort((a, b) => a.date - b.date);
+}
+
+function debugConfigSnapshot(config: BlueBubblesPluginConfig): Record<string, unknown> {
+  return {
+    configured: isConfigured(config),
+    serverUrl: config.serverUrl,
+    webhookPort: config.webhookPort,
+    webhookHost: config.webhookHost,
+    notifications: config.notifications,
+    advancedDebugLogs: config.advancedDebugLogs,
+    aiReply: config.aiReply,
+    chunking: config.chunking,
+    contactCount: Object.keys(config.contacts ?? {}).length,
+    chatHistoryCount: Object.keys(config.chatHistories ?? {}).length,
+    threadSettingsCount: Object.keys(config.threadSettings ?? {}).length,
+  };
 }
 
 async function connect(api: PluginAPI): Promise<void> {
@@ -408,6 +474,7 @@ async function startWebhook(api: PluginAPI, config: BlueBubblesPluginConfig): Pr
     config: aiConfig,
     chunkConfig,
     log: api.log,
+    debugLog: debugLog ?? undefined,
     stateCallback: {
       setAIReplyProcessing: (chatGuid, processing) => stateManager!.setAIReplyProcessing(chatGuid, processing),
       onMessageSent: (chatGuid, bbMessage, toolCalls) => {
@@ -424,6 +491,27 @@ async function startWebhook(api: PluginAPI, config: BlueBubblesPluginConfig): Pr
             api.config.setPluginData('toolCallStore', toolCallStore);
           }
           stateManager.addIncomingMessage(normalized);
+          debugLog?.event('message.sent_to_ui', {
+            chatGuid,
+            messageGuid: normalized.guid,
+            text: normalized.text,
+            toolCallCount: toolCalls?.length ?? 0,
+          }, 'info');
+        }
+      },
+      onAIReplyFailed: (chatGuid, failure) => {
+        if (stateManager) {
+          const localMessage = createLocalAIReplyFailureMessage(chatGuid, failure);
+          storeLocalMessage(api, localMessage);
+          stateManager.addIncomingMessage(localMessage);
+          debugLog?.event('ai_reply.failure_message_added_to_thread', {
+            chatGuid,
+            localMessageGuid: localMessage.guid,
+            runId: failure.runId,
+            stage: failure.stage,
+            error: failure.error,
+            toolCallCount: failure.toolCalls?.length ?? 0,
+          }, 'info');
         }
       },
     },
@@ -437,6 +525,7 @@ async function startWebhook(api: PluginAPI, config: BlueBubblesPluginConfig): Pr
     stateManager: stateManager!,
     client: client!,
     log: api.log,
+    debugLog: debugLog ?? undefined,
     webhookSecret: secret,
     contactResolve: (addr) => contacts!.resolve(addr),
     onNewMessage: async (msg) => {
@@ -478,13 +567,14 @@ async function handlePanelAction(api: PluginAPI, action: string, data?: unknown)
           .map((m) => normalizeMessage(m, chatGuid, (guid) => client!.getAttachmentUrl(guid), (addr) => contacts!.resolve(addr)))
           .reverse();
         const bbReversed = [...bbMessages].reverse();
-        const messages = processMessagesWithReactions(allNormalized, bbReversed);
+        let messages = processMessagesWithReactions(allNormalized, bbReversed);
         // Re-attach persisted tool calls
         for (const msg of messages) {
           if (toolCallStore[msg.guid]) {
             msg.toolCalls = toolCallStore[msg.guid];
           }
         }
+        messages = mergeLocalMessages(chatGuid, messages);
         stateManager.setActiveChatMessages(messages);
         stateManager.markChatRead(chatGuid);
         client.markChatRead(chatGuid).catch(() => {});
@@ -557,10 +647,11 @@ async function handlePanelAction(api: PluginAPI, action: string, data?: unknown)
         // Deduplicate by guid then sort
         const byGuid = new Map<string, NormalizedMessage>();
         for (const m of [...older, ...current]) byGuid.set(m.guid, m);
-        const merged = [...byGuid.values()].sort((a, b) => a.date - b.date);
+        let merged = [...byGuid.values()].sort((a, b) => a.date - b.date);
         for (const msg of merged) {
           if (toolCallStore[msg.guid]) msg.toolCalls = toolCallStore[msg.guid];
         }
+        merged = mergeLocalMessages(chatGuid, merged);
         stateManager.setActiveChatMessages(merged);
       } catch (err) {
         api.log.error('Failed to load more messages:', err);
@@ -860,6 +951,15 @@ export async function activate(api: PluginAPI): Promise<void> {
   // config into encrypted storage. Always clear the plaintext copies even if
   // an encrypted value already exists (interrupted migration / external edit).
   const rawConfig = api.config.getPluginData() as BlueBubblesPluginConfig;
+  debugLog = new AdvancedDebugLogger({
+    enabled: rawConfig.advancedDebugLogs === true,
+    log: api.log,
+  });
+  debugLog.event('plugin.activating', {
+    pluginName: api.pluginName,
+    pluginDir: api.pluginDir,
+    config: debugConfigSnapshot(rawConfig),
+  }, 'info');
   if (rawConfig.password) {
     if (!secrets.has('password')) {
       secrets.set('password', rawConfig.password);
@@ -900,6 +1000,7 @@ export async function activate(api: PluginAPI): Promise<void> {
   iMessageNicknameCache = new IMessageNicknameCache(api.log);
   chatHistory = new ChatHistoryManager(api.config);
   toolCallStore = (api.config.getPluginData().toolCallStore as Record<string, any[]>) ?? {};
+  localMessageStore = (api.config.getPluginData().localMessageStore as Record<string, NormalizedMessage[]>) ?? {};
 
   stateManager = new StateManager(
     api.state,
@@ -948,7 +1049,12 @@ export async function activate(api: PluginAPI): Promise<void> {
   // Watch for config changes
   unsubConfig = api.config.onChanged(() => {
     const config = getConfig(api);
+    debugLog?.setEnabled(config.advancedDebugLogs === true);
+    debugLog?.event('config.changed', {
+      config: debugConfigSnapshot(config),
+    }, 'info');
     api.state.set('configured', isConfigured(config));
+    api.state.set('advancedDebugLogPath', debugLog?.getLogPath() ?? '');
     if (client) client.updateConfig(config);
     if (aiReply) {
       aiReply.updateConfig(getAIReplyConfig(config));
@@ -969,6 +1075,7 @@ export async function activate(api: PluginAPI): Promise<void> {
   api.state.set('hasPassword', secrets.has('password'));
   api.state.set('secretsEncryptionMethod', secrets.encryptionMethod());
   api.state.set('webhookSecret', secrets.get('webhookSecret') ?? '');
+  api.state.set('advancedDebugLogPath', debugLog.getLogPath());
 
   // Sync local iMessage nicknames (deferred so plugin activation completes immediately)
   setTimeout(() => {
@@ -982,6 +1089,10 @@ export async function activate(api: PluginAPI): Promise<void> {
   }
 
   api.log.info('BlueBubbles plugin activated');
+  debugLog.event('plugin.activated', {
+    configured: isConfigured(config),
+    advancedDebugLogPath: debugLog.getLogPath(),
+  }, 'info');
 }
 
 export async function deactivate(): Promise<void> {
@@ -997,5 +1108,6 @@ export async function deactivate(): Promise<void> {
   iMessageNicknameCache = null;
   chatHistory = null;
   secrets = null;
+  debugLog = null;
   webhookStarted = false;
 }

@@ -565,6 +565,25 @@ export function SettingsView({
         </div>
       </SettingsSection>
 
+      {/* Diagnostics section */}
+      <SettingsSection title="Diagnostics">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-medium">Advanced Debug Logs</div>
+            <div className="text-xs text-muted-foreground">
+              Store detailed rolling logs at ~/.kai/plugin-logs/bluebubbles/advanced-debug.log
+            </div>
+          </div>
+          <Toggle
+            active={(config as any).advancedDebugLogs === true}
+            onToggle={() => updateField('advancedDebugLogs', !((config as any).advancedDebugLogs === true))}
+          />
+        </div>
+        <div className="rounded-lg bg-muted/30 p-3 text-xs text-muted-foreground">
+          Max file size: 20MB. The active file rolls to advanced-debug.1.log when full.
+        </div>
+      </SettingsSection>
+
       {/* Server Info section */}
       {state.serverInfo ? (
         <SettingsSection title="Server Info">

@@ -53,6 +53,11 @@
         "type": "boolean",
         "default": true
       },
+      "advancedDebugLogs": {
+        "type": "boolean",
+        "default": false,
+        "description": "Write advanced rolling debug logs to ~/.kai/plugin-logs/bluebubbles/advanced-debug.log"
+      },
       "aiReply": {
         "type": "object",
         "properties": {

@@ -3,6 +3,7 @@ import type { StateManager } from './state-manager.js';
 import type { BlueBubblesClient } from './bb-client.js';
 import { normalizeMessage } from './message-normalizer.js';
 import type { BBMessage, BBWebhookEvent, NormalizedReaction, ReactionType } from '../shared/types.js';
+import type { AdvancedDebugLogAPI } from './debug-logger.js';
 
 const VALID_REACTION_NAMES = new Set(['love', 'like', 'dislike', 'laugh', 'emphasize', 'question']);
 const TAPBACK_INT_MAP: Record<number, string> = {
@@ -33,6 +34,7 @@ export type WebhookHandlerOptions = {
   stateManager: StateManager;
   client: BlueBubblesClient;
   log: LogAPI;
+  debugLog?: AdvancedDebugLogAPI;
   webhookSecret: string;
   contactResolve?: (address: string) => string;
   onNewMessage?: (message: BBMessage) => void | Promise<void>;
@@ -47,17 +49,52 @@ function safeEqual(a: string, b: string): boolean {
   }
 }
 
+function summarizeEvent(event: BBWebhookEvent): Record<string, unknown> {
+  const data = event.data as Partial<BBMessage> | Record<string, unknown> | undefined;
+  const record = data as Record<string, unknown> | undefined;
+  const chats = Array.isArray((data as Partial<BBMessage>)?.chats)
+    ? (data as Partial<BBMessage>).chats
+    : undefined;
+  return {
+    type: event.type,
+    messageGuid: typeof (data as Partial<BBMessage>)?.guid === 'string'
+      ? (data as Partial<BBMessage>).guid
+      : undefined,
+    chatGuid: chats?.[0]?.guid ?? (typeof record?.chatGuid === 'string' ? record.chatGuid : undefined),
+    isFromMe: typeof (data as Partial<BBMessage>)?.isFromMe === 'boolean'
+      ? (data as Partial<BBMessage>).isFromMe
+      : undefined,
+    sender: (data as Partial<BBMessage>)?.handle?.address,
+    text: typeof (data as Partial<BBMessage>)?.text === 'string'
+      ? (data as Partial<BBMessage>).text
+      : undefined,
+  };
+}
+
 export function createWebhookHandler(options: WebhookHandlerOptions) {
-  const { stateManager, client, log, webhookSecret, contactResolve, onNewMessage } = options;
+  const { stateManager, client, log, debugLog, webhookSecret, contactResolve, onNewMessage } = options;
 
   return async (req: PluginHttpRequest): Promise<PluginHttpResponse> => {
+    debugLog?.event('webhook.request', {
+      method: req.method,
+      url: req.url,
+      queryKeys: Object.keys(req.query ?? {}),
+      hasBody: Boolean(req.body),
+    });
+
     if (req.method !== 'POST') {
+      debugLog?.event('webhook.rejected', { reason: 'method_not_allowed', method: req.method }, 'warn');
       return { status: 405, body: '{"error":"Method not allowed"}' };
     }
 
     const provided = req.query.secret || req.headers['x-webhook-secret'] || '';
     if (!webhookSecret || !safeEqual(provided, webhookSecret)) {
       log.warn('Webhook auth failed');
+      debugLog?.event('webhook.rejected', {
+        reason: 'auth_failed',
+        hasConfiguredSecret: Boolean(webhookSecret),
+        providedSecretLength: provided.length,
+      }, 'warn');
       return { status: 401, body: '{"error":"Unauthorized"}' };
     }
 
@@ -65,13 +102,20 @@ export function createWebhookHandler(options: WebhookHandlerOptions) {
     try {
       event = JSON.parse(req.body ?? '{}') as BBWebhookEvent;
     } catch {
+      debugLog?.event('webhook.rejected', { reason: 'invalid_json' }, 'warn');
       return { status: 400, body: '{"error":"Invalid JSON"}' };
     }
 
     try {
-      await handleEvent(event, stateManager, client, log, contactResolve, onNewMessage);
+      debugLog?.event('webhook.event.received', summarizeEvent(event), 'info');
+      await handleEvent(event, stateManager, client, log, debugLog, contactResolve, onNewMessage);
+      debugLog?.event('webhook.event.handled', summarizeEvent(event), 'info');
     } catch (err) {
       log.error('Webhook event handling error:', err);
+      debugLog?.event('webhook.event.failed', {
+        ...summarizeEvent(event),
+        error: err,
+      }, 'error');
     }
 
     return {
@@ -87,6 +131,7 @@ async function handleEvent(
   stateManager: StateManager,
   client: BlueBubblesClient,
   log: LogAPI,
+  debugLog?: AdvancedDebugLogAPI,
   contactResolve?: (address: string) => string,
   onNewMessage?: (message: BBMessage) => void | Promise<void>,
 ): Promise<void> {
@@ -156,6 +201,14 @@ async function handleEvent(
       );
       stateManager.addIncomingMessage(normalized);
       log.info(`New message in ${chatGuid} from ${normalized.senderName}`);
+      debugLog?.event('webhook.new_message.normalized', {
+        chatGuid,
+        messageGuid: msg.guid,
+        sender: normalized.sender,
+        senderName: normalized.senderName,
+        text: normalized.text,
+        attachmentCount: normalized.attachments.length,
+      }, 'info');
 
       if (onNewMessage) {
         await onNewMessage(msg);
@@ -175,12 +228,20 @@ async function handleEvent(
         contactResolve,
       );
       stateManager.updateMessage(normalized);
+      debugLog?.event('webhook.updated_message.normalized', {
+        chatGuid,
+        messageGuid: msg.guid,
+        text: normalized.text,
+        isEdited: normalized.isEdited,
+        isUnsent: normalized.isUnsent,
+      });
       break;
     }
 
     case 'typing-indicator': {
       const typing = data as { display: boolean; guid: string };
       stateManager.setTypingIndicator(typing.guid, typing.display);
+      debugLog?.event('webhook.typing_indicator', typing);
       break;
     }
 
