@@ -553,8 +553,10 @@ export class IMessageNicknameCache {
       if (!contact.hasThumb && !contact.hasImage) continue;
       const addresses = pkToAddresses.get(pk);
       if (!addresses) continue;
-      // If relevantAddresses filter is active, skip contacts with no relevant addresses
-      if (relevantAddresses && relevantAddresses.size > 0 && !addresses.some(addr => relevantAddresses.has(addr))) continue;
+      // If a filter is provided, even an empty one, skip contacts with no
+      // matching addresses. Startup passes an empty set intentionally to avoid
+      // loading every AddressBook photo into plugin/frontend memory.
+      if (relevantAddresses && !addresses.some(addr => relevantAddresses.has(addr))) continue;
       // Only load if at least one address doesn't have a photo yet
       if (addresses.some(addr => !photos[addr])) {
         pksNeedingPhotos.push(pk);

@@ -134,12 +134,20 @@ let chatHistory: ChatHistoryManager | null = null;
 let secrets: SecretStore | null = null;
 let debugLog: AdvancedDebugLogger | null = null;
 let webhookStarted = false;
+let closeHttp: (() => Promise<void>) | null = null;
 let unsubConfig: (() => void) | null = null;
+let initialNicknameSyncTimer: ReturnType<typeof setTimeout> | null = null;
 let toolCallStore: Record<string, any[]> = {}; // messageGuid -> toolCalls
 let messageContentPartStore: Record<string, MessageContentPart[]> = {}; // messageGuid -> ordered assistant content/tool parts
 let localMessageStore: Record<string, NormalizedMessage[]> = {}; // chatGuid -> local-only messages
 
 const MAX_LOCAL_MESSAGES_PER_CHAT = 50;
+const MAX_LOCAL_MESSAGE_CHATS = 50;
+const MAX_TRACE_STORE_MESSAGES = 200;
+const MAX_STORED_TRACE_STRING_LENGTH = 20_000;
+const MAX_STORED_TRACE_ARRAY_LENGTH = 50;
+const MAX_STORED_TRACE_OBJECT_KEYS = 50;
+const MAX_STORED_TRACE_DEPTH = 6;
 
 function showFdaBanner(api: PluginAPI): void {
   api.ui.showBanner({
@@ -153,6 +161,105 @@ function showFdaBanner(api: PluginAPI): void {
 
 function hideFdaBanner(api: PluginAPI): void {
   api.ui.hideBanner('fda-permission');
+}
+
+function truncateStoredString(value: string): string {
+  if (value.length <= MAX_STORED_TRACE_STRING_LENGTH) return value;
+  return `${value.slice(0, MAX_STORED_TRACE_STRING_LENGTH)}...[truncated ${value.length - MAX_STORED_TRACE_STRING_LENGTH} chars]`;
+}
+
+function compactStoredTraceValue(
+  value: unknown,
+  seen = new WeakSet<object>(),
+  depth = 0,
+): unknown {
+  if (value == null) return value;
+  if (typeof value === 'string') return truncateStoredString(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value === 'function') return `[Function ${(value as Function).name || 'anonymous'}]`;
+  if (typeof value !== 'object') return String(value);
+
+  if (Buffer.isBuffer(value)) return `[Buffer ${value.byteLength} bytes]`;
+  if (value instanceof ArrayBuffer) return `[ArrayBuffer ${value.byteLength} bytes]`;
+  if (ArrayBuffer.isView(value)) return `[${value.constructor.name} ${(value as ArrayBufferView).byteLength} bytes]`;
+  if (value instanceof Error) {
+    return {
+      name: value.name,
+      message: truncateStoredString(value.message),
+    };
+  }
+  if (value instanceof Date) return value.toISOString();
+  if (seen.has(value)) return '[Circular]';
+  if (depth >= MAX_STORED_TRACE_DEPTH) return '[MaxDepth]';
+
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    const items = value
+      .slice(0, MAX_STORED_TRACE_ARRAY_LENGTH)
+      .map((item) => compactStoredTraceValue(item, seen, depth + 1));
+    if (value.length > MAX_STORED_TRACE_ARRAY_LENGTH) {
+      items.push(`[truncated ${value.length - MAX_STORED_TRACE_ARRAY_LENGTH} items]`);
+    }
+    return items;
+  }
+
+  const output: Record<string, unknown> = {};
+  const entries = Object.entries(value as Record<string, unknown>);
+  for (const [key, item] of entries.slice(0, MAX_STORED_TRACE_OBJECT_KEYS)) {
+    output[key] = compactStoredTraceValue(item, seen, depth + 1);
+  }
+  if (entries.length > MAX_STORED_TRACE_OBJECT_KEYS) {
+    output.__truncatedKeys = entries.length - MAX_STORED_TRACE_OBJECT_KEYS;
+  }
+  return output;
+}
+
+function compactToolCalls(toolCalls?: any[]): any[] | undefined {
+  if (!toolCalls?.length) return undefined;
+  return compactStoredTraceValue(toolCalls) as any[];
+}
+
+function compactContentParts(parts?: MessageContentPart[]): MessageContentPart[] | undefined {
+  if (!parts?.length) return undefined;
+  return compactStoredTraceValue(parts) as MessageContentPart[];
+}
+
+function compactTracePayload(trace: {
+  toolCalls?: any[];
+  contentParts?: MessageContentPart[];
+}): {
+  toolCalls?: any[];
+  contentParts?: MessageContentPart[];
+} {
+  return {
+    toolCalls: compactToolCalls(trace.toolCalls),
+    contentParts: compactContentParts(trace.contentParts),
+  };
+}
+
+function pruneRecord<T>(record: Record<string, T>, maxEntries: number): Record<string, T> {
+  const entries = Object.entries(record);
+  if (entries.length <= maxEntries) return record;
+  return Object.fromEntries(entries.slice(-maxEntries)) as Record<string, T>;
+}
+
+function pruneTraceStores(): void {
+  toolCallStore = pruneRecord(toolCallStore, MAX_TRACE_STORE_MESSAGES);
+  messageContentPartStore = pruneRecord(messageContentPartStore, MAX_TRACE_STORE_MESSAGES);
+}
+
+function pruneLocalMessageStore(): void {
+  const entries = Object.entries(localMessageStore);
+  if (entries.length <= MAX_LOCAL_MESSAGE_CHATS) return;
+
+  entries.sort(([, a], [, b]) => {
+    const latestA = Math.max(0, ...a.map((msg) => msg.date ?? 0));
+    const latestB = Math.max(0, ...b.map((msg) => msg.date ?? 0));
+    return latestB - latestA;
+  });
+  localMessageStore = Object.fromEntries(entries.slice(0, MAX_LOCAL_MESSAGE_CHATS));
 }
 
 function getConfig(api: PluginAPI): BlueBubblesPluginConfig {
@@ -217,8 +324,8 @@ function createLocalAIReplyFailureMessage(
     isDelivered: false,
     isRead: false,
     error: 1,
-    toolCalls: failure.toolCalls,
-    contentParts: failure.contentParts,
+    toolCalls: compactToolCalls(failure.toolCalls),
+    contentParts: compactContentParts(failure.contentParts),
     isLocalOnly: true,
     localKind: 'ai-reply-failure',
   };
@@ -250,8 +357,8 @@ function createLocalAIReplyProgressMessage(
     isDelivered: false,
     isRead: false,
     error: 0,
-    toolCalls: progress.toolCalls,
-    contentParts: progress.contentParts,
+    toolCalls: compactToolCalls(progress.toolCalls),
+    contentParts: compactContentParts(progress.contentParts),
     isLocalOnly: true,
     localKind: 'ai-reply-progress',
   };
@@ -262,6 +369,7 @@ function storeLocalMessage(api: PluginAPI, message: NormalizedMessage): void {
   const byGuid = new Map(existing.map((msg) => [msg.guid, msg]));
   byGuid.set(message.guid, message);
   localMessageStore[message.chatGuid] = [...byGuid.values()].slice(-MAX_LOCAL_MESSAGES_PER_CHAT);
+  pruneLocalMessageStore();
   api.config.setPluginData('localMessageStore', localMessageStore);
 }
 
@@ -534,14 +642,17 @@ async function startWebhook(api: PluginAPI, config: BlueBubblesPluginConfig): Pr
             (guid) => client!.getAttachmentUrl(guid),
             (addr) => contacts!.resolve(addr),
           );
-          if (trace?.toolCalls?.length) {
-            normalized.toolCalls = trace.toolCalls;
-            toolCallStore[normalized.guid] = trace.toolCalls;
+          const compactTrace = trace ? compactTracePayload(trace) : {};
+          if (compactTrace.toolCalls?.length) {
+            normalized.toolCalls = compactTrace.toolCalls;
+            toolCallStore[normalized.guid] = compactTrace.toolCalls;
+            pruneTraceStores();
             api.config.setPluginData('toolCallStore', toolCallStore);
           }
-          if (trace?.contentParts?.length) {
-            normalized.contentParts = trace.contentParts;
-            messageContentPartStore[normalized.guid] = trace.contentParts;
+          if (compactTrace.contentParts?.length) {
+            normalized.contentParts = compactTrace.contentParts;
+            messageContentPartStore[normalized.guid] = compactTrace.contentParts;
+            pruneTraceStores();
             api.config.setPluginData('messageContentPartStore', messageContentPartStore);
           }
           if (trace?.replaceMessageGuid) {
@@ -762,15 +873,19 @@ async function handlePanelAction(api: PluginAPI, action: string, data?: unknown)
 
         // Send any attachments to the new chat
         if (attachments?.length) {
-          const { writeFileSync, mkdirSync } = await import('fs');
+          const { writeFileSync, mkdirSync, unlinkSync } = await import('fs');
           const { join } = await import('path');
           const { tmpdir } = await import('os');
           const tmpDir = join(tmpdir(), 'kai-bb-attachments');
           mkdirSync(tmpDir, { recursive: true });
           for (const att of attachments) {
             const tmpPath = join(tmpDir, `${Date.now()}-${att.filename}`);
-            writeFileSync(tmpPath, Buffer.from(att.base64, 'base64'));
-            await client.sendAttachment(newChat.guid, tmpPath, att.filename, att.mimeType);
+            try {
+              writeFileSync(tmpPath, Buffer.from(att.base64, 'base64'));
+              await client.sendAttachment(newChat.guid, tmpPath, att.filename, att.mimeType);
+            } finally {
+              try { unlinkSync(tmpPath); } catch { /* ignore */ }
+            }
           }
         }
 
@@ -865,14 +980,19 @@ async function handlePanelAction(api: PluginAPI, action: string, data?: unknown)
     case 'sendAttachmentFromUI': {
       const { chatGuid, filename, mimeType, base64 } = data as { chatGuid: string; filename: string; mimeType: string; base64: string };
       try {
-        const { writeFileSync, mkdirSync } = await import('fs');
+        const { writeFileSync, mkdirSync, unlinkSync } = await import('fs');
         const { join } = await import('path');
         const { tmpdir } = await import('os');
         const tmpDir = join(tmpdir(), 'kai-bb-attachments');
         mkdirSync(tmpDir, { recursive: true });
         const tmpPath = join(tmpDir, `${Date.now()}-${filename}`);
-        writeFileSync(tmpPath, Buffer.from(base64, 'base64'));
-        const result = await client.sendAttachment(chatGuid, tmpPath, filename, mimeType);
+        let result: unknown;
+        try {
+          writeFileSync(tmpPath, Buffer.from(base64, 'base64'));
+          result = await client.sendAttachment(chatGuid, tmpPath, filename, mimeType);
+        } finally {
+          try { unlinkSync(tmpPath); } catch { /* ignore */ }
+        }
         // Push sent attachment to UI immediately
         const bbMsg = (result as any)?.data ?? result;
         if (bbMsg?.guid && stateManager) {
@@ -1017,6 +1137,7 @@ async function handleSettingsAction(api: PluginAPI, action: string, data?: unkno
 
 export async function activate(api: PluginAPI): Promise<void> {
   api.log.info('BlueBubbles plugin activating');
+  closeHttp = () => api.http.close();
 
   secrets = new SecretStore({
     safeStorage: api.safeStorage,
@@ -1080,6 +1201,11 @@ export async function activate(api: PluginAPI): Promise<void> {
   toolCallStore = (api.config.getPluginData().toolCallStore as Record<string, any[]>) ?? {};
   messageContentPartStore = (api.config.getPluginData().messageContentPartStore as Record<string, MessageContentPart[]>) ?? {};
   localMessageStore = (api.config.getPluginData().localMessageStore as Record<string, NormalizedMessage[]>) ?? {};
+  pruneTraceStores();
+  pruneLocalMessageStore();
+  api.config.setPluginData('toolCallStore', toolCallStore);
+  api.config.setPluginData('messageContentPartStore', messageContentPartStore);
+  api.config.setPluginData('localMessageStore', localMessageStore);
 
   stateManager = new StateManager(
     api.state,
@@ -1157,7 +1283,9 @@ export async function activate(api: PluginAPI): Promise<void> {
   api.state.set('advancedDebugLogPath', debugLog.getLogPath());
 
   // Sync local iMessage nicknames (deferred so plugin activation completes immediately)
-  setTimeout(() => {
+  if (initialNicknameSyncTimer) clearTimeout(initialNicknameSyncTimer);
+  initialNicknameSyncTimer = setTimeout(() => {
+    initialNicknameSyncTimer = null;
     syncNicknamesFromLocal(api).catch((err) =>
       api.log.warn('Failed initial iMessage nickname sync:', err),
     );
@@ -1175,9 +1303,16 @@ export async function activate(api: PluginAPI): Promise<void> {
 }
 
 export async function deactivate(): Promise<void> {
+  if (initialNicknameSyncTimer) {
+    clearTimeout(initialNicknameSyncTimer);
+    initialNicknameSyncTimer = null;
+  }
   if (unsubConfig) {
     unsubConfig();
     unsubConfig = null;
+  }
+  if (webhookStarted && closeHttp) {
+    try { await closeHttp(); } catch { /* ignore */ }
   }
   client = null;
   stateManager = null;
@@ -1188,6 +1323,7 @@ export async function deactivate(): Promise<void> {
   chatHistory = null;
   secrets = null;
   debugLog = null;
+  closeHttp = null;
   toolCallStore = {};
   messageContentPartStore = {};
   localMessageStore = {};

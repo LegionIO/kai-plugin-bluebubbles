@@ -47,6 +47,7 @@ export function RecipientPicker({
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [showValidationHint, setShowValidationHint] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Build contact entries for filtering
   const contactEntries = useMemo(() => {
@@ -148,6 +149,12 @@ export function RecipientPicker({
     inputRef.current?.focus();
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+    };
+  }, []);
+
   // Reset highlighted index when suggestions change
   useEffect(() => {
     setHighlightedIndex(-1);
@@ -204,7 +211,11 @@ export function RecipientPicker({
           onKeyDown={handleInputKeyDown}
           onBlur={() => {
             // Small delay so click on suggestion registers
-            setTimeout(() => setHighlightedIndex(-1), 150);
+            if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+            blurTimerRef.current = setTimeout(() => {
+              setHighlightedIndex(-1);
+              blurTimerRef.current = null;
+            }, 150);
           }}
           placeholder={recipients.length === 0 ? 'Name, phone, or email...' : ''}
           className="flex-1 min-w-[100px] bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"

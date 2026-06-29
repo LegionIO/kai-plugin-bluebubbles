@@ -154,6 +154,12 @@ export function MessageBubble({
   };
 
   useEffect(() => {
+    return () => {
+      clearHoverHideTimer();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!showMenu) return;
 
     const closeMenu = (event: MouseEvent) => {

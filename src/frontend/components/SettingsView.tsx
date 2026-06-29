@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Dropdown, AutoManualToggle, useModelCatalog, useProfileCatalog } from './ModelProfileSelectors';
 import type { PluginComponentProps } from '../hooks';
 
@@ -99,6 +99,9 @@ export function SettingsView({
   const [newContactName, setNewContactName] = useState('');
   const [passwordDraft, setPasswordDraft] = useState('');
   const [secretCopied, setSecretCopied] = useState(false);
+  const secretCopiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const testingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
 
   const hasPassword = Boolean(state.hasPassword);
   const webhookSecret = (state.webhookSecret as string) ?? '';
@@ -115,15 +118,24 @@ export function SettingsView({
   const handleCopySecret = useCallback(() => {
     if (!webhookSecret) return;
     void navigator.clipboard?.writeText(webhookSecret).then(() => {
+      if (!mountedRef.current) return;
+      if (secretCopiedTimerRef.current) clearTimeout(secretCopiedTimerRef.current);
       setSecretCopied(true);
-      setTimeout(() => setSecretCopied(false), 1500);
+      secretCopiedTimerRef.current = setTimeout(() => {
+        setSecretCopied(false);
+        secretCopiedTimerRef.current = null;
+      }, 1500);
     });
   }, [webhookSecret]);
 
   const handleTestConnection = useCallback(async () => {
+    if (testingTimerRef.current) clearTimeout(testingTimerRef.current);
     setTesting(true);
     onAction('testConnection');
-    setTimeout(() => setTesting(false), 3000);
+    testingTimerRef.current = setTimeout(() => {
+      setTesting(false);
+      testingTimerRef.current = null;
+    }, 3000);
   }, [onAction]);
 
   const handleAddContact = useCallback(() => {
@@ -137,6 +149,14 @@ export function SettingsView({
   const inputClass = 'w-full rounded-xl border border-border/70 bg-card/80 px-2.5 py-1.5 text-xs placeholder:text-muted-foreground/40 focus:border-primary/50 focus:outline-none';
 
   const contactEntries = Object.entries((state.contacts ?? {}) as Record<string, string>);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      if (secretCopiedTimerRef.current) clearTimeout(secretCopiedTimerRef.current);
+      if (testingTimerRef.current) clearTimeout(testingTimerRef.current);
+    };
+  }, []);
 
   // Group contacts by name to collapse duplicates (e.g. "SPAM" with 50+ numbers)
   const groupedContacts = React.useMemo(() => {

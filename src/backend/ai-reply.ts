@@ -111,6 +111,8 @@ class AIReplyGenerationError extends Error {
 }
 
 const TEXT_CONTENT_PART_SEPARATOR = '\n\n';
+const RECENT_REPLY_TTL_MS = 60 * 60 * 1000;
+const MAX_RECENT_REPLY_CHATS = 200;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -276,6 +278,27 @@ export class AIReplyEngine {
     this.debugLog?.event(event, { runId, ...data }, level);
   }
 
+  private pruneRecentReplies(now = Date.now()): void {
+    for (const [chatGuid, timestamp] of this.recentReplies) {
+      if (now - timestamp > RECENT_REPLY_TTL_MS) {
+        this.recentReplies.delete(chatGuid);
+      }
+    }
+
+    if (this.recentReplies.size <= MAX_RECENT_REPLY_CHATS) return;
+
+    const oldestFirst = [...this.recentReplies.entries()]
+      .sort(([, a], [, b]) => a - b);
+    for (const [chatGuid] of oldestFirst.slice(0, this.recentReplies.size - MAX_RECENT_REPLY_CHATS)) {
+      this.recentReplies.delete(chatGuid);
+    }
+  }
+
+  private markRecentReply(chatGuid: string): void {
+    this.recentReplies.set(chatGuid, Date.now());
+    this.pruneRecentReplies();
+  }
+
   private makeRunId(chatGuid: string, messageGuid: string): string {
     const suffix = Math.random().toString(36).slice(2, 8);
     return `ai-reply-${Date.now()}-${suffix}-${chatGuid}-${messageGuid}`;
@@ -365,7 +388,7 @@ export class AIReplyEngine {
       return;
     }
 
-    this.recentReplies.set(chatGuid, Date.now());
+    this.markRecentReply(chatGuid);
     if (runId) {
       this.debugEvent(runId, 'ai_reply.send.started', {
         chatGuid,
@@ -776,6 +799,7 @@ export class AIReplyEngine {
     });
 
     // Debounce per chat — skip AI generation but message is still in history
+    this.pruneRecentReplies();
     const lastReply = this.recentReplies.get(chatGuid) ?? 0;
     const bypassDebounce = this.isLikelyContinuationCommand(messageText);
     if (Date.now() - lastReply < this.debounceMs && !bypassDebounce) {
@@ -1114,7 +1138,7 @@ export class AIReplyEngine {
       // If only media was sent and no text remains, we're done
       if (!responseText || responseText === '[NO_REPLY]') {
         updateLiveTrace();
-        this.recentReplies.set(chatGuid, Date.now());
+        this.markRecentReply(chatGuid);
         this.history.appendMessage(chatGuid, {
           role: 'assistant',
           content: historyText || result.text.trim(),

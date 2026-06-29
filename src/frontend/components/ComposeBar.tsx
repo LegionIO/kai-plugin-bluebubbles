@@ -21,6 +21,7 @@ export function ComposeBar({ onSend, sending, replyTo, onCancelReply, onTyping, 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastTypingRef = useRef<number>(0);
+  const stagedRef = useRef<StagedFile[]>([]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -29,10 +30,15 @@ export function ComposeBar({ onSend, sending, replyTo, onCancelReply, onTyping, 
     }
   }, [text]);
 
-  // Cleanup preview URLs on unmount
+  useEffect(() => {
+    stagedRef.current = staged;
+  }, [staged]);
+
+  // Cleanup the latest preview URLs on unmount.
   useEffect(() => {
     return () => {
-      staged.forEach((s) => URL.revokeObjectURL(s.previewUrl));
+      stagedRef.current.forEach((s) => URL.revokeObjectURL(s.previewUrl));
+      stagedRef.current = [];
     };
   }, []);
 

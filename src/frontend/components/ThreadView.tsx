@@ -154,6 +154,16 @@ export function ThreadView({
   }, []);
 
   useEffect(() => {
+    return () => {
+      if (smoothScrollFrameRef.current !== null) {
+        cancelAnimationFrame(smoothScrollFrameRef.current);
+        smoothScrollFrameRef.current = null;
+      }
+      smoothScrollingRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
     autoScrollRef.current = autoScroll;
   }, [autoScroll]);
 
