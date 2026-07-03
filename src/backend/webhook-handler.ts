@@ -38,6 +38,8 @@ export type WebhookHandlerOptions = {
   webhookSecret: string;
   contactResolve?: (address: string) => string;
   onNewMessage?: (message: BBMessage) => void | Promise<void>;
+  emitEvent?: (event: string, payload?: unknown) => void;
+  isLocallySent?: (guid: string) => boolean;
 };
 
 function safeEqual(a: string, b: string): boolean {
@@ -72,7 +74,7 @@ function summarizeEvent(event: BBWebhookEvent): Record<string, unknown> {
 }
 
 export function createWebhookHandler(options: WebhookHandlerOptions) {
-  const { stateManager, client, log, debugLog, webhookSecret, contactResolve, onNewMessage } = options;
+  const { stateManager, client, log, debugLog, webhookSecret, contactResolve, onNewMessage, emitEvent, isLocallySent } = options;
 
   return async (req: PluginHttpRequest): Promise<PluginHttpResponse> => {
     debugLog?.event('webhook.request', {
@@ -108,7 +110,7 @@ export function createWebhookHandler(options: WebhookHandlerOptions) {
 
     try {
       debugLog?.event('webhook.event.received', summarizeEvent(event), 'info');
-      await handleEvent(event, stateManager, client, log, debugLog, contactResolve, onNewMessage);
+      await handleEvent(event, stateManager, client, log, debugLog, contactResolve, onNewMessage, emitEvent, isLocallySent);
       debugLog?.event('webhook.event.handled', summarizeEvent(event), 'info');
     } catch (err) {
       log.error('Webhook event handling error:', err);
@@ -134,9 +136,12 @@ async function handleEvent(
   debugLog?: AdvancedDebugLogAPI,
   contactResolve?: (address: string) => string,
   onNewMessage?: (message: BBMessage) => void | Promise<void>,
+  emitEvent?: (event: string, payload?: unknown) => void,
+  isLocallySent?: (guid: string) => boolean,
 ): Promise<void> {
   const type = event.type;
   const data = event.data;
+  const chatFor = (guid: string) => stateManager.getState().chats.find((c) => c.guid === guid);
 
   switch (type) {
     case 'new-message': {
@@ -184,11 +189,43 @@ async function handleEvent(
             stateManager.addReaction(targetGuid, reaction);
             log.info(`Reaction added: ${reactionName} on ${targetGuid}`);
           }
+          emitEvent?.('reaction', {
+            chatGuid,
+            targetGuid,
+            reaction: reactionName,
+            sender: reaction.sender,
+            senderName: contactResolve ? contactResolve(reaction.sender) : reaction.sender,
+            isFromMe: reaction.isFromMe,
+            removed: isRemoval,
+          });
           return;
         }
       }
 
-      if (msg.isFromMe) return;
+      if (msg.isFromMe) {
+        if (!isLocallySent?.(msg.guid)) {
+          const normalized = normalizeMessage(
+            msg,
+            chatGuid,
+            (guid) => client.getAttachmentUrl(guid),
+            contactResolve,
+          );
+          const chat = chatFor(chatGuid);
+          emitEvent?.('message-sent', {
+            guid: normalized.guid,
+            chatGuid,
+            chatName: chat?.displayName ?? chatGuid,
+            sender: 'me',
+            senderName: 'Me',
+            text: normalized.text,
+            isFromMe: true,
+            isGroup: chat?.isGroup ?? chatGuid.includes(';+;'),
+            attachmentCount: normalized.attachments.length,
+            source: 'external',
+          });
+        }
+        return;
+      }
 
       // Send read receipt
       client.markChatRead(chatGuid).catch(() => {});
@@ -201,6 +238,20 @@ async function handleEvent(
       );
       stateManager.addIncomingMessage(normalized);
       log.info(`New message in ${chatGuid} from ${normalized.senderName}`);
+      {
+        const chat = chatFor(chatGuid);
+        emitEvent?.('message-received', {
+          guid: normalized.guid,
+          chatGuid,
+          chatName: chat?.displayName ?? chatGuid,
+          sender: normalized.sender,
+          senderName: normalized.senderName,
+          text: normalized.text,
+          isFromMe: false,
+          isGroup: chat?.isGroup ?? chatGuid.includes(';+;'),
+          attachmentCount: normalized.attachments.length,
+        });
+      }
       debugLog?.event('webhook.new_message.normalized', {
         chatGuid,
         messageGuid: msg.guid,
@@ -228,6 +279,22 @@ async function handleEvent(
         contactResolve,
       );
       stateManager.updateMessage(normalized);
+      {
+        const chat = chatFor(chatGuid);
+        emitEvent?.('message-updated', {
+          guid: normalized.guid,
+          chatGuid,
+          chatName: chat?.displayName ?? chatGuid,
+          sender: normalized.sender,
+          senderName: normalized.senderName,
+          text: normalized.text,
+          isFromMe: normalized.isFromMe,
+          isGroup: chat?.isGroup ?? chatGuid.includes(';+;'),
+          attachmentCount: normalized.attachments.length,
+          isEdited: normalized.isEdited,
+          isUnsent: normalized.isUnsent,
+        });
+      }
       debugLog?.event('webhook.updated_message.normalized', {
         chatGuid,
         messageGuid: msg.guid,
@@ -241,19 +308,20 @@ async function handleEvent(
     case 'typing-indicator': {
       const typing = data as { display: boolean; guid: string };
       stateManager.setTypingIndicator(typing.guid, typing.display);
+      emitEvent?.('typing', { chatGuid: typing.guid, display: typing.display });
       debugLog?.event('webhook.typing_indicator', typing);
       break;
     }
 
-    case 'group-name-change': {
-      log.info('Group name changed, refreshing chats');
-      break;
-    }
-
+    case 'group-name-change':
     case 'participant-added':
     case 'participant-removed':
     case 'participant-left': {
-      log.info(`Participant change (${type}), refreshing chats`);
+      const record = data as { chatGuid?: string; chats?: Array<{ guid: string }>; newName?: string };
+      const chatGuid = record?.chatGuid ?? record?.chats?.[0]?.guid;
+      const change = type === 'group-name-change' ? 'name' : type;
+      log.info(`Group change (${change})${chatGuid ? ` in ${chatGuid}` : ''}, refreshing chats`);
+      emitEvent?.('group-change', { chatGuid, change, newName: record?.newName });
       break;
     }
 
@@ -261,6 +329,7 @@ async function handleEvent(
       const readData = data as { chatGuid?: string };
       if (readData.chatGuid) {
         stateManager.markChatRead(readData.chatGuid);
+        emitEvent?.('chat-read', { chatGuid: readData.chatGuid });
       }
       break;
     }

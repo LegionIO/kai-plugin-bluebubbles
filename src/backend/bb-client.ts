@@ -222,7 +222,11 @@ export class BlueBubblesClient {
 
   async markChatRead(chatGuid: string): Promise<void> {
     const path = BB_API_PATHS.chatRead(chatGuid);
-    await this.fetchFn(this.url(path), { method: 'POST' });
+    const res = await this.fetchFn(this.url(path), { method: 'POST' });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`Mark read: ${res.status} ${res.statusText} - ${body}`);
+    }
   }
 
   getAttachmentUrl(guid: string): string {

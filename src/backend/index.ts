@@ -46,6 +46,14 @@ type PluginAPI = {
     set: (path: string, value: unknown) => void;
     emitEvent: (eventName: string, data?: unknown) => void;
   };
+  events?: {
+    declare: (decl: {
+      events?: Array<{ event: string; title: string; description?: string; payloadSchema?: Record<string, unknown> }>;
+      actions?: Array<{ targetId: string; title: string; description?: string; inputSchema?: Record<string, unknown> }>;
+    }) => void;
+    emit: (event: string, payload?: unknown) => void;
+    on: (key: string, handler: (event: unknown) => void) => () => void;
+  };
   ui: {
     registerPanelView: (descriptor: Record<string, unknown>) => void;
     registerNavigationItem: (descriptor: Record<string, unknown>) => void;
@@ -103,7 +111,7 @@ type PluginAPI = {
     warn: (...args: unknown[]) => void;
     error: (...args: unknown[]) => void;
   };
-  onAction: (targetId: string, handler: (action: string, data?: unknown) => void | Promise<void>) => void;
+  onAction: (targetId: string, handler: (action: string, data?: unknown) => unknown | Promise<unknown>) => void;
   fetch: typeof globalThis.fetch;
   tools: {
     register: (tools: Array<{
@@ -137,6 +145,7 @@ let webhookStarted = false;
 let closeHttp: (() => Promise<void>) | null = null;
 let unsubConfig: (() => void) | null = null;
 let initialNicknameSyncTimer: ReturnType<typeof setTimeout> | null = null;
+let locallySentGuids = new Set<string>();
 let toolCallStore: Record<string, any[]> = {}; // messageGuid -> toolCalls
 let messageContentPartStore: Record<string, MessageContentPart[]> = {}; // messageGuid -> ordered assistant content/tool parts
 let localMessageStore: Record<string, NormalizedMessage[]> = {}; // chatGuid -> local-only messages
@@ -260,6 +269,231 @@ function pruneLocalMessageStore(): void {
     return latestB - latestA;
   });
   localMessageStore = Object.fromEntries(entries.slice(0, MAX_LOCAL_MESSAGE_CHATS));
+}
+
+function emitBusEvent(api: PluginAPI, event: string, payload?: unknown): void {
+  try {
+    if (api.events?.emit) {
+      api.events.emit(event, payload);
+    } else {
+      api.state.emitEvent(event, payload);
+    }
+  } catch (err) {
+    api.log.warn(`[bluebubbles] event emit '${event}' failed:`, err);
+  }
+}
+
+const MAX_LOCALLY_SENT_GUIDS = 500;
+
+function markLocallySent(guid: string): void {
+  locallySentGuids.add(guid);
+  if (locallySentGuids.size > MAX_LOCALLY_SENT_GUIDS) {
+    for (const g of locallySentGuids) {
+      locallySentGuids.delete(g);
+      if (locallySentGuids.size <= MAX_LOCALLY_SENT_GUIDS) break;
+    }
+  }
+}
+
+function declareAutomationCatalog(api: PluginAPI): void {
+  if (!api.events?.declare) return;
+
+  const messageProps = {
+    guid: { type: 'string' },
+    chatGuid: { type: 'string' },
+    chatName: { type: 'string' },
+    sender: { type: 'string' },
+    senderName: { type: 'string' },
+    text: { type: 'string' },
+    isFromMe: { type: 'boolean' },
+    isGroup: { type: 'boolean' },
+    attachmentCount: { type: 'number' },
+  };
+
+  api.events.declare({
+    events: [
+      {
+        event: 'message-received',
+        title: 'Message received',
+        description: 'A new iMessage/SMS arrived from someone else',
+        payloadSchema: { type: 'object', properties: messageProps },
+      },
+      {
+        event: 'message-sent',
+        title: 'Message sent',
+        description: 'A message was sent from this account (manual or AI reply)',
+        payloadSchema: {
+          type: 'object',
+          properties: { ...messageProps, source: { type: 'string', enum: ['manual', 'ai-reply', 'automation', 'tool', 'external'] } },
+        },
+      },
+      {
+        event: 'message-updated',
+        title: 'Message edited or unsent',
+        payloadSchema: {
+          type: 'object',
+          properties: { ...messageProps, isEdited: { type: 'boolean' }, isUnsent: { type: 'boolean' } },
+        },
+      },
+      {
+        event: 'reaction',
+        title: 'Reaction added or removed',
+        payloadSchema: {
+          type: 'object',
+          properties: {
+            chatGuid: { type: 'string' },
+            targetGuid: { type: 'string' },
+            reaction: { type: 'string', enum: ['love', 'like', 'dislike', 'laugh', 'emphasize', 'question'] },
+            sender: { type: 'string' },
+            senderName: { type: 'string' },
+            isFromMe: { type: 'boolean' },
+            removed: { type: 'boolean' },
+          },
+        },
+      },
+      {
+        event: 'typing',
+        title: 'Typing indicator',
+        payloadSchema: {
+          type: 'object',
+          properties: { chatGuid: { type: 'string' }, display: { type: 'boolean' } },
+        },
+      },
+      {
+        event: 'chat-read',
+        title: 'Chat marked read',
+        payloadSchema: { type: 'object', properties: { chatGuid: { type: 'string' } } },
+      },
+      {
+        event: 'group-change',
+        title: 'Group membership or name changed',
+        payloadSchema: {
+          type: 'object',
+          properties: {
+            chatGuid: { type: 'string' },
+            change: { type: 'string', enum: ['name', 'participant-added', 'participant-removed', 'participant-left'] },
+            newName: { type: 'string' },
+          },
+        },
+      },
+      {
+        event: 'connection',
+        title: 'Server connection status changed',
+        payloadSchema: {
+          type: 'object',
+          properties: {
+            status: { type: 'string', enum: ['connecting', 'connected', 'disconnected', 'error'] },
+            error: { type: 'string' },
+          },
+        },
+      },
+    ],
+    actions: [
+      {
+        targetId: 'automation:send-message',
+        title: 'Send message',
+        description: 'Send an iMessage/SMS to a chat',
+        inputSchema: {
+          type: 'object',
+          required: ['chatGuid', 'text'],
+          properties: {
+            chatGuid: { type: 'string' },
+            text: { type: 'string' },
+            replyToGuid: { type: 'string' },
+          },
+        },
+      },
+      {
+        targetId: 'automation:send-reaction',
+        title: 'Send reaction',
+        description: 'Tapback on a message',
+        inputSchema: {
+          type: 'object',
+          required: ['chatGuid', 'messageGuid', 'reaction'],
+          properties: {
+            chatGuid: { type: 'string' },
+            messageGuid: { type: 'string' },
+            reaction: { type: 'string', enum: ['love', 'like', 'dislike', 'laugh', 'emphasize', 'question'] },
+          },
+        },
+      },
+      {
+        targetId: 'automation:mark-read',
+        title: 'Mark chat read',
+        inputSchema: {
+          type: 'object',
+          required: ['chatGuid'],
+          properties: { chatGuid: { type: 'string' } },
+        },
+      },
+    ],
+  });
+}
+
+const AUTOMATION_ACTION_TARGETS = ['automation:send-message', 'automation:send-reaction', 'automation:mark-read'] as const;
+
+async function handleAutomationAction(
+  api: PluginAPI,
+  targetId: (typeof AUTOMATION_ACTION_TARGETS)[number],
+  data?: unknown,
+): Promise<{ success: true; [k: string]: unknown } | { error: string }> {
+  if (!client || !stateManager) return { error: 'BlueBubbles not connected' };
+
+  try {
+    switch (targetId) {
+      case 'automation:send-message': {
+        const { chatGuid, text, replyToGuid } = data as { chatGuid: string; text: string; replyToGuid?: string };
+        if (!chatGuid || !text) return { error: 'chatGuid and text are required' };
+        const chunkConfig = getChunkConfig(getConfig(api));
+        const results = await client.sendChunkedText(chatGuid, text, chunkConfig.maxLength, { replyToGuid });
+        const chat = stateManager.getState().chats.find((c) => c.guid === chatGuid);
+        for (const msg of results) {
+          const normalized = normalizeMessage(
+            msg,
+            chatGuid,
+            (guid) => client!.getAttachmentUrl(guid),
+            (addr) => contacts!.resolve(addr),
+          );
+          stateManager.addIncomingMessage(normalized);
+          markLocallySent(normalized.guid);
+          emitBusEvent(api, 'message-sent', {
+            guid: normalized.guid,
+            chatGuid,
+            chatName: chat?.displayName ?? chatGuid,
+            sender: 'me',
+            senderName: 'Me',
+            text: normalized.text,
+            isFromMe: true,
+            isGroup: chat?.isGroup ?? false,
+            attachmentCount: normalized.attachments.length,
+            source: 'automation',
+          });
+        }
+        chatHistory?.appendMessage(chatGuid, { role: 'assistant', content: text });
+        return { success: true, chatGuid, messagesSent: results.length, guids: results.map((m) => m.guid) };
+      }
+
+      case 'automation:send-reaction': {
+        const { chatGuid, messageGuid, reaction } = data as { chatGuid: string; messageGuid: string; reaction: string };
+        if (!chatGuid || !messageGuid || !reaction) return { error: 'chatGuid, messageGuid and reaction are required' };
+        await client.sendReaction(chatGuid, messageGuid, reaction);
+        return { success: true, chatGuid, messageGuid, reaction };
+      }
+
+      case 'automation:mark-read': {
+        const { chatGuid } = data as { chatGuid: string };
+        if (!chatGuid) return { error: 'chatGuid is required' };
+        await client.markChatRead(chatGuid);
+        stateManager.markChatRead(chatGuid);
+        emitBusEvent(api, 'chat-read', { chatGuid });
+        return { success: true, chatGuid };
+      }
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    api.log.error(`Automation ${targetId} failed:`, message);
+    return { error: message };
+  }
 }
 
 function getConfig(api: PluginAPI): BlueBubblesPluginConfig {
@@ -404,10 +638,12 @@ async function connect(api: PluginAPI): Promise<void> {
   const config = getConfig(api);
   if (!isConfigured(config)) {
     stateManager!.setConnectionStatus('disconnected');
+    emitBusEvent(api, 'connection', { status: 'disconnected' });
     return;
   }
 
   stateManager!.setConnectionStatus('connecting');
+  emitBusEvent(api, 'connection', { status: 'connecting' });
 
   if (!client) {
     client = new BlueBubblesClient(config, api.fetch);
@@ -422,6 +658,7 @@ async function connect(api: PluginAPI): Promise<void> {
     const info = await client.getServerInfo();
     stateManager!.setServerInfo(info);
     stateManager!.setConnectionStatus('connected');
+    emitBusEvent(api, 'connection', { status: 'connected' });
     api.log.info('Connected to BlueBubbles server', info);
 
     await loadChats(api);
@@ -435,6 +672,7 @@ async function connect(api: PluginAPI): Promise<void> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     stateManager!.setConnectionStatus('error', msg);
+    emitBusEvent(api, 'connection', { status: 'error', error: msg });
     api.log.error('Connection failed:', msg);
   }
 }
@@ -660,6 +898,20 @@ async function startWebhook(api: PluginAPI, config: BlueBubblesPluginConfig): Pr
           } else {
             stateManager.addIncomingMessage(normalized);
           }
+          const chat = stateManager.getState().chats.find((c) => c.guid === chatGuid);
+          markLocallySent(normalized.guid);
+          emitBusEvent(api, 'message-sent', {
+            guid: normalized.guid,
+            chatGuid,
+            chatName: chat?.displayName ?? chatGuid,
+            sender: 'me',
+            senderName: 'Me',
+            text: normalized.text,
+            isFromMe: true,
+            isGroup: chat?.isGroup ?? false,
+            attachmentCount: normalized.attachments.length,
+            source: 'ai-reply',
+          });
           debugLog?.event('message.sent_to_ui', {
             chatGuid,
             messageGuid: normalized.guid,
@@ -713,6 +965,8 @@ async function startWebhook(api: PluginAPI, config: BlueBubblesPluginConfig): Pr
     debugLog: debugLog ?? undefined,
     webhookSecret: secret,
     contactResolve: (addr) => contacts!.resolve(addr),
+    emitEvent: (event, payload) => emitBusEvent(api, event, payload),
+    isLocallySent: (guid) => locallySentGuids.has(guid),
     onNewMessage: async (msg) => {
       const chatGuid = msg.chats?.[0]?.guid ?? '';
       const chat = stateManager!.getState().chats.find((c) => c.guid === chatGuid);
@@ -779,9 +1033,23 @@ async function handlePanelAction(api: PluginAPI, action: string, data?: unknown)
       stateManager.setSendingMessage(true);
       try {
         const results = await client.sendChunkedText(chatGuid, text, chunkConfig.maxLength, { replyToGuid });
+        const chat = stateManager.getState().chats.find((c) => c.guid === chatGuid);
         for (const msg of results) {
           const normalized = normalizeMessage(msg, chatGuid, (guid) => client!.getAttachmentUrl(guid), (addr) => contacts!.resolve(addr));
           stateManager.addIncomingMessage(normalized);
+          markLocallySent(normalized.guid);
+          emitBusEvent(api, 'message-sent', {
+            guid: normalized.guid,
+            chatGuid,
+            chatName: chat?.displayName ?? chatGuid,
+            sender: 'me',
+            senderName: 'Me',
+            text: normalized.text,
+            isFromMe: true,
+            isGroup: chat?.isGroup ?? false,
+            attachmentCount: normalized.attachments.length,
+            source: 'manual',
+          });
         }
         chatHistory?.appendMessage(chatGuid, { role: 'assistant', content: text });
       } catch (err) {
@@ -852,6 +1120,7 @@ async function handlePanelAction(api: PluginAPI, action: string, data?: unknown)
       const { chatGuid } = data as { chatGuid: string };
       stateManager.markChatRead(chatGuid);
       client.markChatRead(chatGuid).catch(() => {});
+      emitBusEvent(api, 'chat-read', { chatGuid });
       break;
     }
 
@@ -869,6 +1138,21 @@ async function handlePanelAction(api: PluginAPI, action: string, data?: unknown)
       };
       try {
         const newChat = await client.createChat(addresses, message);
+        if (message && newChat.lastMessage?.guid) {
+          markLocallySent(newChat.lastMessage.guid);
+          emitBusEvent(api, 'message-sent', {
+            guid: newChat.lastMessage.guid,
+            chatGuid: newChat.guid,
+            chatName: newChat.displayName ?? newChat.guid,
+            sender: 'me',
+            senderName: 'Me',
+            text: newChat.lastMessage.text ?? message,
+            isFromMe: true,
+            isGroup: addresses.length > 1,
+            attachmentCount: 0,
+            source: 'manual',
+          });
+        }
         await loadChats(api);
 
         // Send any attachments to the new chat
@@ -882,7 +1166,23 @@ async function handlePanelAction(api: PluginAPI, action: string, data?: unknown)
             const tmpPath = join(tmpDir, `${Date.now()}-${att.filename}`);
             try {
               writeFileSync(tmpPath, Buffer.from(att.base64, 'base64'));
-              await client.sendAttachment(newChat.guid, tmpPath, att.filename, att.mimeType);
+              const result = await client.sendAttachment(newChat.guid, tmpPath, att.filename, att.mimeType);
+              const bbMsg = (result as any)?.data ?? result;
+              if (bbMsg?.guid) {
+                markLocallySent(bbMsg.guid);
+                emitBusEvent(api, 'message-sent', {
+                  guid: bbMsg.guid,
+                  chatGuid: newChat.guid,
+                  chatName: newChat.displayName ?? newChat.guid,
+                  sender: 'me',
+                  senderName: 'Me',
+                  text: bbMsg.text ?? '',
+                  isFromMe: true,
+                  isGroup: addresses.length > 1,
+                  attachmentCount: 1,
+                  source: 'manual',
+                });
+              }
             } finally {
               try { unlinkSync(tmpPath); } catch { /* ignore */ }
             }
@@ -998,6 +1298,20 @@ async function handlePanelAction(api: PluginAPI, action: string, data?: unknown)
         if (bbMsg?.guid && stateManager) {
           const normalized = normalizeMessage(bbMsg, chatGuid, (guid) => client!.getAttachmentUrl(guid), (addr) => contacts!.resolve(addr));
           stateManager.addIncomingMessage(normalized);
+          markLocallySent(normalized.guid);
+          const chat = stateManager.getState().chats.find((c) => c.guid === chatGuid);
+          emitBusEvent(api, 'message-sent', {
+            guid: normalized.guid,
+            chatGuid,
+            chatName: chat?.displayName ?? chatGuid,
+            sender: 'me',
+            senderName: 'Me',
+            text: normalized.text,
+            isFromMe: true,
+            isGroup: chat?.isGroup ?? false,
+            attachmentCount: normalized.attachments.length,
+            source: 'manual',
+          });
         }
         api.log.info(`Sent attachment from UI: ${filename}`);
       } catch (err) {
@@ -1216,6 +1530,12 @@ export async function activate(api: PluginAPI): Promise<void> {
 
   stateManager.setContacts(contacts.getAll());
 
+  try {
+    declareAutomationCatalog(api);
+  } catch (err) {
+    api.log.warn('Failed to declare automation catalog:', err);
+  }
+
   // Register UI components
   api.ui.registerPanelView({
     id: PANEL_ID,
@@ -1237,6 +1557,9 @@ export async function activate(api: PluginAPI): Promise<void> {
   // Register action handlers
   api.onAction(`panel:${PANEL_ID}`, (action, data) => handlePanelAction(api, action, data));
   api.onAction('settings:SettingsView', (action, data) => handleSettingsAction(api, action, data));
+  for (const targetId of AUTOMATION_ACTION_TARGETS) {
+    api.onAction(targetId, (_action, data) => handleAutomationAction(api, targetId, data));
+  }
 
   // Register AI tools
   const tools = buildBlueBubblesTools({
@@ -1248,6 +1571,22 @@ export async function activate(api: PluginAPI): Promise<void> {
     getChunkConfig: () => getChunkConfig(getConfig(api)),
     log: api.log,
     loadChats: () => loadChats(api),
+    onMessageSent: (chatGuid, guid, text, chatMeta) => {
+      markLocallySent(guid);
+      const chat = stateManager?.getState().chats.find((c) => c.guid === chatGuid);
+      emitBusEvent(api, 'message-sent', {
+        guid,
+        chatGuid,
+        chatName: chat?.displayName ?? chatMeta?.chatName ?? chatGuid,
+        sender: 'me',
+        senderName: 'Me',
+        text,
+        isFromMe: true,
+        isGroup: chat?.isGroup ?? chatMeta?.isGroup ?? false,
+        attachmentCount: 0,
+        source: 'tool',
+      });
+    },
   });
   api.tools.register(tools as any);
 
@@ -1327,5 +1666,6 @@ export async function deactivate(): Promise<void> {
   toolCallStore = {};
   messageContentPartStore = {};
   localMessageStore = {};
+  locallySentGuids = new Set();
   webhookStarted = false;
 }

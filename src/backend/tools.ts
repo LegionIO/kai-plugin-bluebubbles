@@ -22,6 +22,12 @@ type ToolDeps = {
   getChunkConfig: () => ChunkConfig;
   log: LogAPI;
   loadChats: () => Promise<void>;
+  onMessageSent?: (
+    chatGuid: string,
+    guid: string,
+    text: string,
+    chatMeta?: { chatName?: string; isGroup?: boolean },
+  ) => void;
 };
 
 type ToolDefinition = {
@@ -299,6 +305,7 @@ export function buildBlueBubblesTools(deps: ToolDeps): ToolDefinition[] {
               );
               stateManager.addIncomingMessage(normalized);
             }
+            deps.onMessageSent?.(data.chatGuid, msg.guid, msg.text ?? '');
           }
 
           chatHistory?.appendMessage(data.chatGuid, { role: 'assistant', content: data.text });
@@ -380,6 +387,7 @@ export function buildBlueBubblesTools(deps: ToolDeps): ToolDefinition[] {
                 );
                 stateManager.addIncomingMessage(normalized);
               }
+              deps.onMessageSent?.(match.guid, msg.guid, msg.text ?? '');
             }
             chatHistory?.appendMessage(match.guid, { role: 'assistant', content: data.text });
             return {
@@ -391,6 +399,12 @@ export function buildBlueBubblesTools(deps: ToolDeps): ToolDefinition[] {
           }
 
           const newChat = await client.createChat([data.address], data.text);
+          if (newChat.lastMessage?.guid) {
+            deps.onMessageSent?.(newChat.guid, newChat.lastMessage.guid, newChat.lastMessage.text ?? data.text, {
+              chatName: newChat.displayName ?? data.address,
+              isGroup: false,
+            });
+          }
           await deps.loadChats();
           return {
             success: true,
@@ -539,6 +553,12 @@ export function buildBlueBubblesTools(deps: ToolDeps): ToolDefinition[] {
           const client = requireClient(deps);
           const data = input as { addresses: string[]; message?: string };
           const newChat = await client.createChat(data.addresses, data.message);
+          if (data.message && newChat.lastMessage?.guid) {
+            deps.onMessageSent?.(newChat.guid, newChat.lastMessage.guid, newChat.lastMessage.text ?? data.message, {
+              chatName: newChat.displayName ?? data.addresses.join(', '),
+              isGroup: data.addresses.length > 1,
+            });
+          }
           await deps.loadChats();
           return {
             success: true,
