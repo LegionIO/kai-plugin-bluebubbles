@@ -15,7 +15,7 @@ import { DEFAULT_AI_SYSTEM_PROMPT, DEFAULT_MAX_CHUNK_LENGTH } from '../shared/co
 import type { AdvancedDebugLogAPI } from './debug-logger.js';
 
 type AgentGenerateOptions = {
-  messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string | unknown[] }>;
+  messages: Array<{ role: 'user' | 'assistant' | 'system' | 'tool'; content: string | unknown[] }>;
   modelKey?: string;
   profileKey?: string;
   reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
@@ -297,6 +297,22 @@ export class AIReplyEngine {
   private markRecentReply(chatGuid: string): void {
     this.recentReplies.set(chatGuid, Date.now());
     this.pruneRecentReplies();
+  }
+
+  private appendAssistantHistory(
+    chatGuid: string,
+    content: string,
+    contentParts?: MessageContentPart[],
+  ): void {
+    const trimmedContent = content.trim();
+    const hasToolCalls = contentParts?.some((part) => part.type === 'tool-call') ?? false;
+    if (!trimmedContent && !hasToolCalls) return;
+
+    this.history.appendMessage(chatGuid, {
+      role: 'assistant',
+      content: trimmedContent || '[No text reply sent]',
+      ...(hasToolCalls ? { contentParts } : {}),
+    });
   }
 
   private makeRunId(chatGuid: string, messageGuid: string): string {
@@ -866,7 +882,7 @@ export class AIReplyEngine {
       failureStage = 'building reply context';
       const threadSettings = this.getThreadSettings(chatGuid);
       const systemPrompt = this.buildSystemPrompt(isGroup, chat, chatGuid, threadSettings?.systemPrompt);
-      const messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string | unknown[] }> =
+      const messages: Array<{ role: 'user' | 'assistant' | 'system' | 'tool'; content: string | unknown[] }> =
         this.history.toAgentMessages(chatGuid);
       this.debugEvent(runId, 'ai_reply.context_built', {
         chatGuid,
@@ -963,12 +979,14 @@ export class AIReplyEngine {
           (text) => text.replace(/\[NO_REPLY\]/g, ''),
         );
         updateLiveTrace();
-        if (historyText && !historyText.includes('[NO_REPLY]')) {
-          this.history.appendMessage(chatGuid, {
-            role: 'assistant',
-            content: historyText,
-          });
-        }
+        const retainedHistoryText = historyText.includes('[NO_REPLY]')
+          ? historyText.replace(/\[NO_REPLY\]/g, '').trim()
+          : historyText;
+        this.appendAssistantHistory(
+          chatGuid,
+          retainedHistoryText,
+          displayContentParts,
+        );
         this.log.info(`AI decided not to reply in ${chatGuid}`);
         this.debugEvent(runId, 'ai_reply.no_reply', {
           chatGuid,
@@ -1023,12 +1041,7 @@ export class AIReplyEngine {
       // If only reactions and no text remaining, we're done
       if (!responseText || responseText === '[NO_REPLY]') {
         updateLiveTrace();
-        if (historyText) {
-          this.history.appendMessage(chatGuid, {
-            role: 'assistant',
-            content: historyText,
-          });
-        }
+        this.appendAssistantHistory(chatGuid, historyText, displayContentParts);
         this.debugEvent(runId, 'ai_reply.completed_reaction_only', {
           chatGuid,
           messageGuid: msg.guid,
@@ -1139,10 +1152,11 @@ export class AIReplyEngine {
       if (!responseText || responseText === '[NO_REPLY]') {
         updateLiveTrace();
         this.markRecentReply(chatGuid);
-        this.history.appendMessage(chatGuid, {
-          role: 'assistant',
-          content: historyText || result.text.trim(),
-        });
+        this.appendAssistantHistory(
+          chatGuid,
+          historyText || result.text.trim(),
+          displayContentParts,
+        );
         this.debugEvent(runId, 'ai_reply.completed_media_only', {
           chatGuid,
           messageGuid: msg.guid,
@@ -1162,10 +1176,11 @@ export class AIReplyEngine {
       }, runId);
 
       // Record in history
-      this.history.appendMessage(chatGuid, {
-        role: 'assistant',
-        content: historyText || responseText,
-      });
+      this.appendAssistantHistory(
+        chatGuid,
+        historyText || responseText,
+        displayContentParts,
+      );
 
       this.log.info(`AI replied in ${chatGuid}: ${responseText.slice(0, 100)}...`);
       this.debugEvent(runId, 'ai_reply.completed', {
@@ -1188,6 +1203,14 @@ export class AIReplyEngine {
         : result?.contentParts;
       const partialText = generationError?.partialText || generationError?.historyText || historyTextForFailure;
       const generatedText = stage.toLowerCase().includes('send') ? responseTextForFailure : undefined;
+
+      if (toolCalls?.length) {
+        this.appendAssistantHistory(
+          chatGuid,
+          generatedText || partialText || `[Reply failed during ${stage}]`,
+          contentParts,
+        );
+      }
 
       this.debugEvent(runId, 'ai_reply.failed', {
         chatGuid,

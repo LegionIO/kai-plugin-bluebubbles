@@ -20,7 +20,8 @@ import {
   DEFAULT_WEBHOOK_HOST,
   DEFAULT_MAX_CHUNK_LENGTH,
   DEFAULT_AI_SYSTEM_PROMPT,
-  DEFAULT_MAX_HISTORY_PER_CHAT,
+  HISTORY_PER_CHAT_RANGE,
+  TOOL_HISTORY_LIMIT_RANGES,
 } from '../shared/constants.js';
 import type {
   BlueBubblesPluginConfig,
@@ -28,6 +29,7 @@ import type {
   ChunkConfig,
   MessageContentPart,
   NormalizedMessage,
+  ToolHistoryLimits,
 } from '../shared/types.js';
 
 type PluginAPI = {
@@ -79,7 +81,7 @@ type PluginAPI = {
   };
   agent: {
     generate: (options: {
-      messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string | unknown[] }>;
+      messages: Array<{ role: 'user' | 'assistant' | 'system' | 'tool'; content: string | unknown[] }>;
       modelKey?: string;
       profileKey?: string;
       reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
@@ -88,7 +90,7 @@ type PluginAPI = {
       tools?: boolean;
     }) => Promise<{ text: string; modelKey: string; toolCalls?: any[] }>;
     stream?: (options: {
-      messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string | unknown[] }>;
+      messages: Array<{ role: 'user' | 'assistant' | 'system' | 'tool'; content: string | unknown[] }>;
       modelKey?: string;
       profileKey?: string;
       reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
@@ -505,17 +507,60 @@ function getConfig(api: PluginAPI): BlueBubblesPluginConfig {
   };
 }
 
+function boundedInteger(value: unknown, fallback: number, min: number, max: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(value)));
+}
+
 function getAIReplyConfig(config: BlueBubblesPluginConfig): AIReplyConfig {
   return {
     enabled: config.aiReply?.enabled ?? false,
     systemPrompt: config.aiReply?.systemPrompt ?? DEFAULT_AI_SYSTEM_PROMPT,
     dmBehavior: config.aiReply?.dmBehavior ?? 'smart',
     groupBehavior: config.aiReply?.groupBehavior ?? 'smart',
-    maxHistoryPerChat: config.aiReply?.maxHistoryPerChat ?? DEFAULT_MAX_HISTORY_PER_CHAT,
+    maxHistoryPerChat: boundedInteger(
+      config.aiReply?.maxHistoryPerChat,
+      HISTORY_PER_CHAT_RANGE.default,
+      HISTORY_PER_CHAT_RANGE.min,
+      HISTORY_PER_CHAT_RANGE.max,
+    ),
+    toolHistoryMaxStringLength: boundedInteger(
+      config.aiReply?.toolHistoryMaxStringLength,
+      TOOL_HISTORY_LIMIT_RANGES.maxStringLength.default,
+      TOOL_HISTORY_LIMIT_RANGES.maxStringLength.min,
+      TOOL_HISTORY_LIMIT_RANGES.maxStringLength.max,
+    ),
+    toolHistoryMaxArrayLength: boundedInteger(
+      config.aiReply?.toolHistoryMaxArrayLength,
+      TOOL_HISTORY_LIMIT_RANGES.maxArrayLength.default,
+      TOOL_HISTORY_LIMIT_RANGES.maxArrayLength.min,
+      TOOL_HISTORY_LIMIT_RANGES.maxArrayLength.max,
+    ),
+    toolHistoryMaxObjectKeys: boundedInteger(
+      config.aiReply?.toolHistoryMaxObjectKeys,
+      TOOL_HISTORY_LIMIT_RANGES.maxObjectKeys.default,
+      TOOL_HISTORY_LIMIT_RANGES.maxObjectKeys.min,
+      TOOL_HISTORY_LIMIT_RANGES.maxObjectKeys.max,
+    ),
+    toolHistoryMaxDepth: boundedInteger(
+      config.aiReply?.toolHistoryMaxDepth,
+      TOOL_HISTORY_LIMIT_RANGES.maxDepth.default,
+      TOOL_HISTORY_LIMIT_RANGES.maxDepth.min,
+      TOOL_HISTORY_LIMIT_RANGES.maxDepth.max,
+    ),
     modelOverride: config.aiReply?.modelOverride,
     profileOverride: config.aiReply?.profileOverride,
     reasoningEffort: config.aiReply?.reasoningEffort,
     fallbackEnabled: config.aiReply?.fallbackEnabled,
+  };
+}
+
+function getToolHistoryLimits(config: AIReplyConfig): ToolHistoryLimits {
+  return {
+    maxStringLength: config.toolHistoryMaxStringLength,
+    maxArrayLength: config.toolHistoryMaxArrayLength,
+    maxObjectKeys: config.toolHistoryMaxObjectKeys,
+    maxDepth: config.toolHistoryMaxDepth,
   };
 }
 
@@ -1511,7 +1556,12 @@ export async function activate(api: PluginAPI): Promise<void> {
   contacts = new ContactBook(api.config);
   contactPhotoCache = new ContactPhotoCache(api.config);
   iMessageNicknameCache = new IMessageNicknameCache(api.log);
-  chatHistory = new ChatHistoryManager(api.config);
+  const initialAIConfig = getAIReplyConfig(rawConfig);
+  chatHistory = new ChatHistoryManager(
+    api.config,
+    initialAIConfig.maxHistoryPerChat,
+    getToolHistoryLimits(initialAIConfig),
+  );
   toolCallStore = (api.config.getPluginData().toolCallStore as Record<string, any[]>) ?? {};
   messageContentPartStore = (api.config.getPluginData().messageContentPartStore as Record<string, MessageContentPart[]>) ?? {};
   localMessageStore = (api.config.getPluginData().localMessageStore as Record<string, NormalizedMessage[]>) ?? {};
@@ -1605,7 +1655,9 @@ export async function activate(api: PluginAPI): Promise<void> {
       aiReply.updateChunkConfig(getChunkConfig(config));
     }
     if (chatHistory) {
-      chatHistory.setMaxPerChat(config.aiReply?.maxHistoryPerChat ?? DEFAULT_MAX_HISTORY_PER_CHAT);
+      const aiConfig = getAIReplyConfig(config);
+      chatHistory.setMaxPerChat(aiConfig.maxHistoryPerChat);
+      chatHistory.setToolHistoryLimits(getToolHistoryLimits(aiConfig));
     }
     contacts?.reload();
     stateManager!.setContacts(contacts!.getAll());

@@ -13,6 +13,7 @@ iMessage & SMS integration for [Kai](https://github.com/LegionIO/kai-desktop) vi
 - **Message chunking** — Configurable splitting of long messages (sentence / word / newline / anywhere)
 - **Per-thread settings** — Override model, profile, reasoning effort, and routing per conversation
 - **Tool call tracing** — Toggle visibility of AI tool calls with args, results, and timing
+- **Tool context continuity** — Follow-up messages receive prior tool calls and results as native conversation history
 - **Notifications** — Native and in-app notifications with click-to-navigate
 - **Webhook receiver** — Local HTTP server receives real-time events from BlueBubbles
 

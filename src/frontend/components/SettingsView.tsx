@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Dropdown, AutoManualToggle, useModelCatalog, useProfileCatalog } from './ModelProfileSelectors';
 import type { PluginComponentProps } from '../hooks';
+import { HISTORY_PER_CHAT_RANGE, TOOL_HISTORY_LIMIT_RANGES } from '../../shared/constants';
 
 function formatSyncTime(timestamp: number): string {
   const diff = Date.now() - timestamp;
@@ -109,6 +110,18 @@ export function SettingsView({
   const updateField = useCallback((path: string, value: unknown) => {
     setPluginConfig?.(path, value);
   }, [setPluginConfig]);
+
+  const updateBoundedInteger = useCallback((
+    path: string,
+    rawValue: string,
+    range: { default: number; min: number; max: number },
+  ) => {
+    const parsed = Number.parseInt(rawValue, 10);
+    const value = Number.isFinite(parsed)
+      ? Math.min(range.max, Math.max(range.min, parsed))
+      : range.default;
+    updateField(path, value);
+  }, [updateField]);
 
   const handleSavePassword = useCallback(() => {
     onAction('savePassword', { password: passwordDraft });
@@ -373,12 +386,71 @@ export function SettingsView({
             <div className="grid grid-cols-2 gap-3">
               <SettingsField
                 label="Max History Per Chat"
-                description="Messages kept for AI context"
+                description={`Messages kept for AI context. Default ${HISTORY_PER_CHAT_RANGE.default}; range ${HISTORY_PER_CHAT_RANGE.min}–${HISTORY_PER_CHAT_RANGE.max}.`}
               >
                 <input
                   type="number"
-                  value={(config as any).aiReply?.maxHistoryPerChat ?? 50}
-                  onChange={(e: any) => updateField('aiReply.maxHistoryPerChat', parseInt(e.target.value, 10) || 50)}
+                  min={HISTORY_PER_CHAT_RANGE.min}
+                  max={HISTORY_PER_CHAT_RANGE.max}
+                  step={1}
+                  value={(config as any).aiReply?.maxHistoryPerChat ?? HISTORY_PER_CHAT_RANGE.default}
+                  onChange={(e: any) => updateBoundedInteger('aiReply.maxHistoryPerChat', e.target.value, HISTORY_PER_CHAT_RANGE)}
+                  className={inputClass}
+                />
+              </SettingsField>
+              <SettingsField
+                label="Max Tool String Characters"
+                description={`Characters kept per string in historical tool arguments/results. Default ${TOOL_HISTORY_LIMIT_RANGES.maxStringLength.default}; range ${TOOL_HISTORY_LIMIT_RANGES.maxStringLength.min}–${TOOL_HISTORY_LIMIT_RANGES.maxStringLength.max}.`}
+              >
+                <input
+                  type="number"
+                  min={TOOL_HISTORY_LIMIT_RANGES.maxStringLength.min}
+                  max={TOOL_HISTORY_LIMIT_RANGES.maxStringLength.max}
+                  step={1}
+                  value={(config as any).aiReply?.toolHistoryMaxStringLength ?? TOOL_HISTORY_LIMIT_RANGES.maxStringLength.default}
+                  onChange={(e: any) => updateBoundedInteger('aiReply.toolHistoryMaxStringLength', e.target.value, TOOL_HISTORY_LIMIT_RANGES.maxStringLength)}
+                  className={inputClass}
+                />
+              </SettingsField>
+              <SettingsField
+                label="Max Tool Array Items"
+                description={`Items kept per array in historical tool arguments/results. Default ${TOOL_HISTORY_LIMIT_RANGES.maxArrayLength.default}; range ${TOOL_HISTORY_LIMIT_RANGES.maxArrayLength.min}–${TOOL_HISTORY_LIMIT_RANGES.maxArrayLength.max}.`}
+              >
+                <input
+                  type="number"
+                  min={TOOL_HISTORY_LIMIT_RANGES.maxArrayLength.min}
+                  max={TOOL_HISTORY_LIMIT_RANGES.maxArrayLength.max}
+                  step={1}
+                  value={(config as any).aiReply?.toolHistoryMaxArrayLength ?? TOOL_HISTORY_LIMIT_RANGES.maxArrayLength.default}
+                  onChange={(e: any) => updateBoundedInteger('aiReply.toolHistoryMaxArrayLength', e.target.value, TOOL_HISTORY_LIMIT_RANGES.maxArrayLength)}
+                  className={inputClass}
+                />
+              </SettingsField>
+              <SettingsField
+                label="Max Tool Object Keys"
+                description={`Keys kept per object in historical tool arguments/results. Default ${TOOL_HISTORY_LIMIT_RANGES.maxObjectKeys.default}; range ${TOOL_HISTORY_LIMIT_RANGES.maxObjectKeys.min}–${TOOL_HISTORY_LIMIT_RANGES.maxObjectKeys.max}.`}
+              >
+                <input
+                  type="number"
+                  min={TOOL_HISTORY_LIMIT_RANGES.maxObjectKeys.min}
+                  max={TOOL_HISTORY_LIMIT_RANGES.maxObjectKeys.max}
+                  step={1}
+                  value={(config as any).aiReply?.toolHistoryMaxObjectKeys ?? TOOL_HISTORY_LIMIT_RANGES.maxObjectKeys.default}
+                  onChange={(e: any) => updateBoundedInteger('aiReply.toolHistoryMaxObjectKeys', e.target.value, TOOL_HISTORY_LIMIT_RANGES.maxObjectKeys)}
+                  className={inputClass}
+                />
+              </SettingsField>
+              <SettingsField
+                label="Max Tool Nesting Depth"
+                description={`Object/array levels kept in historical tool arguments/results. Default ${TOOL_HISTORY_LIMIT_RANGES.maxDepth.default}; range ${TOOL_HISTORY_LIMIT_RANGES.maxDepth.min}–${TOOL_HISTORY_LIMIT_RANGES.maxDepth.max}.`}
+              >
+                <input
+                  type="number"
+                  min={TOOL_HISTORY_LIMIT_RANGES.maxDepth.min}
+                  max={TOOL_HISTORY_LIMIT_RANGES.maxDepth.max}
+                  step={1}
+                  value={(config as any).aiReply?.toolHistoryMaxDepth ?? TOOL_HISTORY_LIMIT_RANGES.maxDepth.default}
+                  onChange={(e: any) => updateBoundedInteger('aiReply.toolHistoryMaxDepth', e.target.value, TOOL_HISTORY_LIMIT_RANGES.maxDepth)}
                   className={inputClass}
                 />
               </SettingsField>

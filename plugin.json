@@ -79,7 +79,38 @@
           },
           "maxHistoryPerChat": {
             "type": "number",
-            "default": 50
+            "default": 50,
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "Maximum number of user and assistant messages retained per chat for AI context"
+          },
+          "toolHistoryMaxStringLength": {
+            "type": "number",
+            "default": 12000,
+            "minimum": 256,
+            "maximum": 200000,
+            "description": "Maximum characters retained for each string inside historical tool arguments and results"
+          },
+          "toolHistoryMaxArrayLength": {
+            "type": "number",
+            "default": 50,
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "Maximum items retained from each array inside historical tool arguments and results"
+          },
+          "toolHistoryMaxObjectKeys": {
+            "type": "number",
+            "default": 50,
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "Maximum keys retained from each object inside historical tool arguments and results"
+          },
+          "toolHistoryMaxDepth": {
+            "type": "number",
+            "default": 6,
+            "minimum": 1,
+            "maximum": 20,
+            "description": "Maximum nested object or array depth retained in historical tool arguments and results"
           },
           "modelOverride": {
             "type": "string"

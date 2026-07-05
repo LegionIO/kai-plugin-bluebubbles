@@ -211,6 +211,10 @@ export type AIReplyConfig = {
   dmBehavior: 'smart' | 'always' | 'never';
   groupBehavior: 'smart' | 'always' | 'never' | 'mentioned';
   maxHistoryPerChat: number;
+  toolHistoryMaxStringLength: number;
+  toolHistoryMaxArrayLength: number;
+  toolHistoryMaxObjectKeys: number;
+  toolHistoryMaxDepth: number;
   modelOverride?: string;
   profileOverride?: string;
   reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
@@ -237,6 +241,14 @@ export type ConversationMessage = {
   senderName?: string;
   timestamp: number;
   attachments?: Array<{ guid?: string; url?: string; mimeType: string }>;
+  contentParts?: MessageContentPart[];
+};
+
+export type ToolHistoryLimits = {
+  maxStringLength: number;
+  maxArrayLength: number;
+  maxObjectKeys: number;
+  maxDepth: number;
 };
 
 export type BlueBubblesPluginConfig = {

@@ -8,6 +8,19 @@ export const DEFAULT_MAX_CHUNK_LENGTH = 4000;
 export const DEFAULT_MAX_HISTORY_PER_CHAT = 50;
 export const DEFAULT_CHUNK_SPLIT_MODE = 'sentence' as const;
 
+export const HISTORY_PER_CHAT_RANGE = {
+  default: DEFAULT_MAX_HISTORY_PER_CHAT,
+  min: 1,
+  max: 1_000,
+} as const;
+
+export const TOOL_HISTORY_LIMIT_RANGES = {
+  maxStringLength: { default: 12_000, min: 256, max: 200_000 },
+  maxArrayLength: { default: 50, min: 1, max: 1_000 },
+  maxObjectKeys: { default: 50, min: 1, max: 1_000 },
+  maxDepth: { default: 6, min: 1, max: 20 },
+} as const;
+
 export const TAPBACK_MAP: Record<number, string> = {
   2000: 'love',
   2001: 'like',
