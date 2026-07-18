@@ -19,6 +19,7 @@
     "ui:settings",
     "network:fetch",
     "http:listen",
+    "http:listen:network",
     "notifications:send",
     "navigation:open",
     "conversations:read",
