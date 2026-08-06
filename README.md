@@ -40,6 +40,24 @@ Then configure via **Settings → BlueBubbles**:
 - Set the webhook port (default: 8742)
 - Add a webhook in BlueBubbles Server pointing to `http://<your-machine-ip>:8742/webhook`
 
+## Slash commands
+
+With auto-reply enabled, these are answered from the thread itself — no model
+call, no token spend. Surrounding and repeated whitespace is ignored, and the
+command is case-insensitive.
+
+| Command | Effect |
+| --- | --- |
+| `/model` | Current model for the chat, plus every selectable model |
+| `/model <name>` | Switch this chat's model; the name may contain spaces and matches on key, display name, or a unique prefix/substring |
+| `/model default` | Drop the per-chat model (`none`, `clear`, `reset` also work) |
+| `/profile`, `/profile <name>`, `/profile default` | The same, for the agent profile. Selecting a profile clears the chat's model override so the profile's own model applies |
+| `/status`, `/health` | Server connection and version, round-trip time, chats loaded, webhook listener, auto-reply behavior, and the chat's effective model and profile |
+| `/ping` | `pong` plus the round trip to the BlueBubbles server |
+
+Selections are per-chat and persist as thread settings, the same ones the panel
+exposes. Any other `/word` message is left alone and reaches the model normally.
+
 ## Development
 
 ```bash

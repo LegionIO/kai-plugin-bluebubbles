@@ -2,6 +2,16 @@ import type { BlueBubblesClient } from './bb-client.js';
 import type { ContactBook } from './contacts.js';
 import type { ChatHistoryManager } from './chat-history.js';
 import { chunkText } from './chunker.js';
+import {
+  defaultModelKey,
+  defaultProfileKey,
+  modelCatalog,
+  parseCommand,
+  profileCatalog,
+  runCommand,
+  type ParsedCommand,
+  type StatusSnapshot,
+} from './commands.js';
 import type {
   BBMessage,
   AIReplyConfig,
@@ -233,6 +243,9 @@ export class AIReplyEngine {
   private log: LogAPI;
   private stateCallback: StateCallback;
   private getThreadSettings: (chatGuid: string) => ThreadSettings | undefined;
+  private setThreadSettings?: (chatGuid: string, settings: ThreadSettings) => void;
+  private getAppConfig?: () => Record<string, unknown> | undefined;
+  private getStatus?: () => StatusSnapshot;
   private debugLog?: AdvancedDebugLogAPI;
   private recentReplies = new Map<string, number>();
   private debounceMs = 10_000;
@@ -247,6 +260,9 @@ export class AIReplyEngine {
     log: LogAPI;
     stateCallback: StateCallback;
     getThreadSettings?: (chatGuid: string) => ThreadSettings | undefined;
+    setThreadSettings?: (chatGuid: string, settings: ThreadSettings) => void;
+    getAppConfig?: () => Record<string, unknown> | undefined;
+    getStatus?: () => StatusSnapshot;
     debugLog?: AdvancedDebugLogAPI;
   }) {
     this.agent = options.agent;
@@ -258,6 +274,9 @@ export class AIReplyEngine {
     this.log = options.log;
     this.stateCallback = options.stateCallback;
     this.getThreadSettings = options.getThreadSettings ?? (() => undefined);
+    this.setThreadSettings = options.setThreadSettings;
+    this.getAppConfig = options.getAppConfig;
+    this.getStatus = options.getStatus;
     this.debugLog = options.debugLog;
   }
 
@@ -390,6 +409,57 @@ export class AIReplyEngine {
       /^(do it for real|for real|actually do it|really do it)$/.test(normalized) ||
       /^(run|add|send|delete|remove|change|fix)\b/.test(normalized)
     );
+  }
+
+  /**
+   * Answers a slash command in the thread without involving the model, and
+   * persists any thread setting it changed.
+   */
+  private async runSlashCommand(
+    command: ParsedCommand,
+    chatGuid: string,
+    isGroup: boolean,
+    runId: string,
+    messageGuid: string,
+  ): Promise<void> {
+    const appConfig = this.getAppConfig?.();
+    const status = this.getStatus?.() ?? {};
+
+    // /status and /ping report reachability, so both pay for a live round trip.
+    if (command.name === 'ping' || command.name === 'status') {
+      const startedAt = Date.now();
+      const reachable = await this.client.ping().catch(() => false);
+      status.pingMs = reachable ? Date.now() - startedAt : null;
+    }
+
+    const result = runCommand({
+      command,
+      config: this.config,
+      threadSettings: this.getThreadSettings(chatGuid),
+      isGroup,
+      models: modelCatalog(appConfig),
+      profiles: profileCatalog(appConfig),
+      ...(defaultModelKey(appConfig) ? { defaultModelKey: defaultModelKey(appConfig) } : {}),
+      ...(defaultProfileKey(appConfig) ? { defaultProfileKey: defaultProfileKey(appConfig) } : {}),
+      status,
+      catalogAvailable: Boolean(appConfig),
+      canPersist: Boolean(this.setThreadSettings),
+    });
+
+    if (result.threadSettings) {
+      this.setThreadSettings?.(chatGuid, result.threadSettings);
+    }
+
+    this.debugEvent(runId, 'ai_reply.command_handled', {
+      chatGuid,
+      messageGuid,
+      command: command.name,
+      argument: command.argument,
+      changedThreadSettings: Boolean(result.threadSettings),
+      replyLength: result.reply.length,
+    }, 'info');
+
+    await this.sendTextChunks(chatGuid, result.reply, undefined, runId);
   }
 
   private async sendTextChunks(
@@ -780,6 +850,14 @@ export class AIReplyEngine {
         chatGuid,
         messageGuid: msg.guid,
       });
+      return;
+    }
+
+    // Slash commands are answered here, before any behavior gating, debounce,
+    // or model call: they are chat control, not conversation.
+    const command = parseCommand(messageText);
+    if (command) {
+      await this.runSlashCommand(command, chatGuid, isGroup, runId, msg.guid);
       return;
     }
 

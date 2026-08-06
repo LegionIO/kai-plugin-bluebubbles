@@ -1001,6 +1001,36 @@ async function startWebhook(api: PluginAPI, config: BlueBubblesPluginConfig): Pr
       const cfg = getConfig(api);
       return cfg.threadSettings?.[chatGuid];
     },
+    setThreadSettings: (chatGuid, settings) => {
+      const cfg = getConfig(api);
+      const current = cfg.threadSettings ?? {};
+      current[chatGuid] = settings;
+      api.config.setPluginData('threadSettings', current);
+    },
+    // The model and profile catalogs live in the host config, which is the only
+    // place a plugin backend can read them from.
+    getAppConfig: () => {
+      try {
+        return api.config.get();
+      } catch (err) {
+        api.log.warn('Could not read Kai config for slash commands:', err);
+        return undefined;
+      }
+    },
+    getStatus: () => {
+      const cfg = getConfig(api);
+      const state = stateManager?.getState();
+      return {
+        serverUrl: cfg.serverUrl,
+        connectionStatus: state?.connectionStatus,
+        serverVersion: state?.serverInfo?.server_version,
+        privateApi: state?.serverInfo?.private_api,
+        chatCount: state?.chats.length,
+        webhookHost: cfg.webhookHost ?? DEFAULT_WEBHOOK_HOST,
+        webhookPort: cfg.webhookPort ?? DEFAULT_WEBHOOK_PORT,
+        webhookListening: webhookStarted,
+      };
+    },
   });
 
   const handler = createWebhookHandler({
