@@ -5,6 +5,11 @@ import { normalizeMessage } from './message-normalizer.js';
 import type { BBMessage, BBWebhookEvent, NormalizedReaction, ReactionType } from '../shared/types.js';
 import type { AdvancedDebugLogAPI } from './debug-logger.js';
 
+// iBlue stamps every webhook delivery with a stable id and retries anything it
+// treats as failed, so a retry carries the id of the attempt it repeats.
+const DELIVERY_ID_HEADER = 'x-iblue-webhook-delivery-id';
+const RECENT_DELIVERY_LIMIT = 500;
+
 const VALID_REACTION_NAMES = new Set(['love', 'like', 'dislike', 'laugh', 'emphasize', 'question']);
 const TAPBACK_INT_MAP: Record<number, string> = {
   2000: 'love', 2001: 'like', 2002: 'dislike', 2003: 'laugh', 2004: 'emphasize', 2005: 'question',
@@ -42,6 +47,15 @@ export type WebhookHandlerOptions = {
   isLocallySent?: (guid: string) => boolean;
 };
 
+function headerValue(headers: Record<string, string> | undefined, name: string): string | undefined {
+  const direct = headers?.[name];
+  if (typeof direct === 'string') return direct;
+  for (const [key, value] of Object.entries(headers ?? {})) {
+    if (key.toLowerCase() === name) return value;
+  }
+  return undefined;
+}
+
 function safeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   try {
@@ -76,6 +90,26 @@ function summarizeEvent(event: BBWebhookEvent): Record<string, unknown> {
 export function createWebhookHandler(options: WebhookHandlerOptions) {
   const { stateManager, client, log, debugLog, webhookSecret, contactResolve, onNewMessage, emitEvent, isLocallySent } = options;
 
+  // Retries repeat a delivery id, so remembering recent ids keeps a redelivery
+  // from starting a second run of work already in flight. Bounded because this
+  // handler lives for the plugin's lifetime.
+  const recentDeliveries = new Set<string>();
+  const recentDeliveryOrder: string[] = [];
+  const rememberDelivery = (id: string): void => {
+    recentDeliveries.add(id);
+    recentDeliveryOrder.push(id);
+    while (recentDeliveryOrder.length > RECENT_DELIVERY_LIMIT) {
+      const evicted = recentDeliveryOrder.shift();
+      if (evicted !== undefined) recentDeliveries.delete(evicted);
+    }
+  };
+
+  const ack: PluginHttpResponse = {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+    body: '{"ok":true}',
+  };
+
   return async (req: PluginHttpRequest): Promise<PluginHttpResponse> => {
     debugLog?.event('webhook.request', {
       method: req.method,
@@ -108,23 +142,37 @@ export function createWebhookHandler(options: WebhookHandlerOptions) {
       return { status: 400, body: '{"error":"Invalid JSON"}' };
     }
 
-    try {
-      debugLog?.event('webhook.event.received', summarizeEvent(event), 'info');
-      await handleEvent(event, stateManager, client, log, debugLog, contactResolve, onNewMessage, emitEvent, isLocallySent);
-      debugLog?.event('webhook.event.handled', summarizeEvent(event), 'info');
-    } catch (err) {
-      log.error('Webhook event handling error:', err);
-      debugLog?.event('webhook.event.failed', {
-        ...summarizeEvent(event),
-        error: err,
-      }, 'error');
+    const deliveryId = headerValue(req.headers, DELIVERY_ID_HEADER);
+    if (deliveryId !== undefined) {
+      if (recentDeliveries.has(deliveryId)) {
+        log.info(`Ignoring repeated webhook delivery ${deliveryId}`);
+        debugLog?.event('webhook.delivery.duplicate', {
+          deliveryId,
+          ...summarizeEvent(event),
+        }, 'warn');
+        return ack;
+      }
+      rememberDelivery(deliveryId);
     }
 
-    return {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-      body: '{"ok":true}',
-    };
+    // Acknowledge before handling. handleEvent can run a full AI reply, and a
+    // sender waiting on the response times out and redelivers mid-run, which
+    // produces a second reply to the same message.
+    void (async () => {
+      try {
+        debugLog?.event('webhook.event.received', summarizeEvent(event), 'info');
+        await handleEvent(event, stateManager, client, log, debugLog, contactResolve, onNewMessage, emitEvent, isLocallySent);
+        debugLog?.event('webhook.event.handled', summarizeEvent(event), 'info');
+      } catch (err) {
+        log.error('Webhook event handling error:', err);
+        debugLog?.event('webhook.event.failed', {
+          ...summarizeEvent(event),
+          error: err,
+        }, 'error');
+      }
+    })();
+
+    return ack;
   };
 }
 
